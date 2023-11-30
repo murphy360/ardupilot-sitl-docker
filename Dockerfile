@@ -3,7 +3,7 @@ FROM ubuntu:20.04
 ARG COPTER_TAG=Copter-4.0.3
 
 # Update and upgrade the base system
-RUN apt update && upgrade -y
+RUN apt update && apt upgrade -y
 
 # Install git and set it to use https instead of git protocol
 RUN apt install -y git; git config --global url."https://github.com/".insteadOf git://github.com/
@@ -24,6 +24,7 @@ RUN git submodule update --init --recursive
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Need sudo and lsb-release for the installation prerequisites
+# gdb is for debugging
 RUN apt-get install -y sudo lsb-release tzdata gdb
 
 # Need USER set so usermod does not fail...
