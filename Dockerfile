@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y git; git config --global url."https://g
 
 # Now grab ArduPilot from GitHub
 RUN git clone https://github.com/ArduPilot/ardupilot.git ardupilot
-WORKDIR ardupilot
+WORKDIR /ardupilot
 
 # Checkout the latest Copter...
 RUN git checkout ${COPTER_TAG}
