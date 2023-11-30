@@ -1,12 +1,17 @@
-FROM ubuntu:18.04
+FROM ubuntu:20.04
 
 ARG COPTER_TAG=Copter-4.0.3
 
-# install git 
-RUN apt update && apt install -y git; git config --global url."https://github.com/".insteadOf git://github.com/
+# Update and upgrade the base system
+RUN apt update && upgrade -y
+
+# Install git and set it to use https instead of git protocol
+RUN apt install -y git; git config --global url."https://github.com/".insteadOf git://github.com/
 
 # Now grab ArduPilot from GitHub
 RUN git clone https://github.com/ArduPilot/ardupilot.git ardupilot
+
+# Set the working directory
 WORKDIR ardupilot
 
 # Checkout the latest Copter...
@@ -22,8 +27,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get install -y sudo lsb-release tzdata gdb
 
 # Need USER set so usermod does not fail...
-# Install all prerequisites now
-RUN USER=nobody Tools/environment_install/install-prereqs-ubuntu.sh -y
+# Install all prerequisites now. This script is from ardupilot repository
+RUN USER=nobody Tools/environment_install/install-prereqs-ubuntu.sh -y 
 
 # Continue build instructions from https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md
 RUN ./waf distclean
