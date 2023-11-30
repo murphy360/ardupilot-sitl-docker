@@ -23,7 +23,7 @@ RUN apt-get install -y sudo lsb-release tzdata gdb
 
 # Need USER set so usermod does not fail...
 # Install all prerequisites now
-RUN USER=nobody Tools/environment_install/install-prereqs-ubuntu.sh -y
+RUN Tools/environment_install/install-prereqs-ubuntu.sh -y
 
 # Continue build instructions from https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md
 RUN ./waf distclean
