@@ -27,7 +27,8 @@ ENV USER=${USER_NAME}
 
 RUN echo "ardupilot ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USER_NAME}
 RUN chmod 0440 /etc/sudoers.d/${USER_NAME}
-#RUN chown -R ${USER_NAME}:${USER_NAME} /${USER_NAME}
+RUN mkdir -p /${USER_NAME}
+RUN chown -R ${USER_NAME}:${USER_NAME} /${USER_NAME}
 
 # Switch to non root user
 USER ${USER_NAME}
@@ -56,10 +57,10 @@ RUN sudo apt-get clean \
 
 # Now grab ArduPilot from GitHub
 # j8 is for parallelism
-RUN git clone --recurse-submodules -j8 https://github.com/ArduPilot/ardupilot.git ardupilot
+RUN git clone --recurse-submodules -j8 https://github.com/ArduPilot/ardupilot.git /${USER_NAME}
 
 # Set the working directory
-WORKDIR /ardupilot
+WORKDIR /${USER_NAME}
 
 # Checkout the latest Copter...
 RUN git checkout ${COPTER_TAG}
