@@ -20,9 +20,6 @@ WORKDIR /ardupilot
 # Checkout the latest Copter...
 RUN git checkout ${COPTER_TAG}
 
-# Now start build instructions from http://ardupilot.org/dev/docs/setting-up-sitl-on-linux.html
-RUN git submodule update --init --recursive
-
 # Need sudo and lsb-release for the installation prerequisites
 # gdb is for debugging
 RUN apt-get install -y sudo lsb-release tzdata gdb
@@ -32,7 +29,7 @@ RUN apt-get install -y sudo lsb-release tzdata gdb
 RUN USER=nobody Tools/environment_install/install-prereqs-ubuntu.sh -y 
 
 # Continue build instructions from https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md
-RUN ./waf clean
+#RUN ./waf clean
 RUN ./waf configure --board sitl
 RUN ./waf copter
 RUN ./waf rover 
