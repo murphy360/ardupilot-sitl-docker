@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     bash-completion \ 
     git \
     apt-utils \
+    ca-certificates \
     git config --global url."https://github.com/".insteadOf git://github.com/
 
 # Create non root user
