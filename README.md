@@ -1,30 +1,77 @@
 ArduPilot Software-in-the-Loop Simulator Docker Container
 =========================================================
 
-The purpose of this is to run an ArduPilot SITL from within Docker.
+The purpose of this is to run an ArduPilot SITL (Targetted at Various Vehicles) from within Docker.
+
+forked from radarku/ardupilot-sitl-docker and updated to ubuntu 20.04 and currend ardupilot tagged releases.  
+updated from current dockerfile documentation from https://github.com/ArduPilot/ardupilot
+
+
 
 DockerHub
 ---------
 
 A pre-built Docker image is available on DockerHub at:
 
-https://hub.docker.com/r/radarku/ardupilot-sitl
+https://hub.docker.com/repository/docker/murphy360/ardupilot-sitl-docker (Master, shmaybe working??? Untested)
+https://hub.docker.com/repository/docker/murphy360/ardupilot-sitl-copter
+https://hub.docker.com/repository/docker/murphy360/ardupilot-sitl-plane
+https://hub.docker.com/repository/docker/murphy360/ardupilot-sitl-rover
+https://hub.docker.com/repository/docker/murphy360/ardupilot-sitl-sub
 
-- To download it, run `docker pull radarku/ardupilot-sitl`
-- To run it, run `docker run -it --rm -p 5760:5760 radarku/ardupilot-sitl`
+- To download it, run `docker pull murphy360/ardupilot-sitl-docker`
+- To run it, run `docker run -it --rm -p 5760:5760 murphy360/ardupilot-sitl-docker`
 - To use it with [Docker Compose](https://docs.docker.com/compose/), add the following service to your `docker-compose.yml` file:
     - You can launch it with `docker-compose up -d`
-    - If you update your `docker-compose.yml`, you can restart your container by running `docker-compose up -d` without getting the container ID and killing the container manually. See https://github.com/radarku/ardupilot-sitl-docker/issues/3
+    - If you update your `docker-compose.yml`, you can restart your container by running `docker-compose up -d` without getting the container ID and killing the container manually.
     - To check the logs in `ArduCopter.log`, run `docker exec -it "$FOLDER_NAME_ardupilot-sitl_1" watch -n 1 "cat /tmp/ArduCopter.log"`, where you should update `$FOLDER_NAME` with the folder containing the `docker-compose.yml`.
 
 ```yml
 services:
-  ardupilot-sitl:
-    image: radarku/ardupilot-sitl
-    platform: linux/amd64
-    tty: true
-    ports:
-      - 5760:5760
+    ardupilot-sitl-copter:
+        image: murphy360/ardupilot-sitl-copter
+        container_name: ardupilot
+        tty: true
+        environment:
+            - LAT=32.62354
+            - LON=-116.9456
+            - VEHICLE=ArduCopter
+            - MODEL=+
+        ports:
+            - "5760:5760"
+    ardupilot-sitl-rover:
+        image: murphy360/ardupilot-sitl-rover
+        container_name: ardupilot_rover
+        tty: true
+        environment:
+            - LAT=32.71234
+            - LON=-117.22345
+            - VEHICLE=APMrover2
+            - MODEL=rover
+        ports:
+            - "5761:5760"
+    ardupilot-sitl-plane:
+        image: murphy360/ardupilot-sitl-plane
+        container_name: ardupilot_plane
+        tty: true
+        environment:
+          - LAT=32.693993
+          - LON=-117.205200
+          - VEHICLE=ArduPlane
+          - MODEL=plane
+        ports:
+          - "5762:5760"
+    ardupilot-sitl-sub:
+        image: murphy360/ardupilot-sitl-sub
+        container_name: ardupilot_sub
+        tty: true
+        environment:
+          - LAT=32.719617
+          - LON=-117.222498
+          - VEHICLE=ArduSub
+          - MODEL=vectored
+        ports:
+          - "5763:5760"
 ```
 
 Quick Start
@@ -32,14 +79,14 @@ Quick Start
 
 If you'd rather build the docker image yourself:
 
-`docker build --tag ardupilot github.com/radarku/ardupilot-sitl-docker`
+`docker build --tag ardupilot github.com/murphy360/ardupilot-sitl-docker`
 
 You can now use the `--build-arg` option to specify which branch or tag in the ardupilot
 repository you'd like to use. Here's an example:
 
-`docker build --tag ardupilot --build-arg COPTER_TAG=Copter-4.0.1 github.com/radarku/ardupilot-sitl-docker`
+`docker build --tag ardupilot --build-arg GIT_TAG=Copter-4.0.1 github.com/murphy360/ardupilot-sitl-docker` (UNTESTED as of 01DEC2023)
 
-If no COPTER_TAG is supplied, the build will use the default defined in the Dockerfile, currently set at Copter-4.0.3
+If no COPTER_TAG is supplied, the build will use the default defined in the Dockerfile, currently set at Copter-4.4.3
 
 To run the image:
 

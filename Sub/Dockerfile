@@ -77,7 +77,7 @@ RUN ./waf plane
 RUN ./waf sub
 
 # Variables for simulator
-ENV INSTANCE 0
+ENV INSTANCE 4
 ENV LAT 42.3898
 ENV LON -71.1476
 ENV ALT 14
