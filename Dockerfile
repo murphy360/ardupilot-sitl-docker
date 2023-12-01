@@ -55,11 +55,15 @@ ENV BUILDLOGS=/tmp/buildlogs
 # Now grab ArduPilot from GitHub
 RUN git clone --recursive https://github.com/ArduPilot/ardupilot.git /${USER_NAME}
 
+
 # Set the working directory
 WORKDIR /${USER_NAME}
 
 # Checkout the latest Copter...
 RUN git checkout ${COPTER_TAG}
+
+# Now start build instructions from http://ardupilot.org/dev/docs/setting-up-sitl-on-linux.html
+RUN git submodule update --init --recursive
 
 # Install the required packages
 RUN /${USER_NAME}/Tools/environment_install/install-prereqs-ubuntu.sh -y
