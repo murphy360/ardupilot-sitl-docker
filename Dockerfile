@@ -1,6 +1,5 @@
 FROM ardupilot/ardupilot-dev-base
 
-USER ardupilot
 ARG COPTER_TAG=Copter-4.4.3
 ARG DEBIAN_FRONTEND="noninteractive"
 
