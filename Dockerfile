@@ -1,4 +1,4 @@
-FROM ubuntu:20.04
+FROM ubuntu:18.04
 
 ARG COPTER_TAG=Copter-4.4.3
 
@@ -30,9 +30,9 @@ RUN git checkout ${COPTER_TAG}
 # Install all prerequisites now. This script is from ardupilot repository
 #RUN USER=nobody Tools/environment_install/install-prereqs-ubuntu.sh -y 
 # force non sudo install
-USER nobody
-RUN Tools/environment_install/install-prereqs-ubuntu.sh -y -q
-USER root
+
+RUN USER=nobody Tools/environment_install/install-prereqs-ubuntu.sh -y -q
+
 # Continue build instructions from https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md
 RUN ./waf distclean
 RUN ./waf configure --board sitl
