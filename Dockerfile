@@ -5,6 +5,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG USER_NAME=ardupilot
 ARG USER_UID=1000
 ARG USER_GID=1000
+ENV CCACHE_MAXSIZE=1G
+ARG COPTER_TAG=Copter-4.4.3
+ENV SKIP_AP_EXT_ENV=1 SKIP_AP_GRAPHIC_ENV=1 SKIP_AP_COV_ENV=1 SKIP_AP_GIT_CHECK=1 
 
 # Add non root username with sudo access
 RUN groupadd ${USER_NAME} --gid ${USER_GID}\
@@ -29,9 +32,7 @@ RUN chown -R ${USER_NAME}:${USER_NAME} /${USER_NAME}
 # Switch to non root user
 USER ${USER_NAME}
 
-# This is needed to avoid the tzdata interactive prompt
-ENV SKIP_AP_EXT_ENV=1 SKIP_AP_GRAPHIC_ENV=1 SKIP_AP_COV_ENV=1 SKIP_AP_GIT_CHECK=1 
-RUN Tools/environment_install/install-prereqs-ubuntu.sh -y
+
 
 # add waf alias to ardupilot waf to .ardupilot_env
 RUN echo "alias waf=\"/${USER_NAME}/waf\"" >> ~/.ardupilot_env
@@ -55,12 +56,6 @@ ENV BUILDLOGS=/tmp/buildlogs
 RUN sudo apt-get clean \
     && sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-ENV CCACHE_MAXSIZE=1G
-
-
-ARG COPTER_TAG=Copter-4.4.3
-ARG DEBIAN_FRONTEND="noninteractive"
-
 # Now grab ArduPilot from GitHub
 # j8 is for parallelism
 RUN git clone --recurse-submodules -j8 https://github.com/ArduPilot/ardupilot.git ardupilot
@@ -70,6 +65,9 @@ WORKDIR /ardupilot
 
 # Checkout the latest Copter...
 RUN git checkout ${COPTER_TAG}
+
+# Install the required packages
+RUN Tools/environment_install/install-prereqs-ubuntu.sh -y
 
 # Continue build instructions from https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md
 RUN ./waf distclean
