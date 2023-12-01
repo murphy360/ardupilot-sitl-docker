@@ -76,8 +76,8 @@ RUN ./waf rover
 RUN ./waf plane
 RUN ./waf sub
 
-# Variables for simulator
-ENV INSTANCE 3
+# Instance will offset your port number by 10 https://discuss.ardupilot.org/t/multiple-sitl-instance-help/65283
+ENV INSTANCE 0
 ENV LAT 42.3898
 ENV LON -71.1476
 ENV ALT 14
@@ -89,9 +89,6 @@ ENV VEHICLE ArduCopter
 # Cleanup
 RUN sudo apt-get clean \
     && sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-
-# Expose Port
-EXPOSE 5760/tcp
 
 # Finally the command
 ENTRYPOINT /ardupilot/Tools/autotest/sim_vehicle.py --vehicle ${VEHICLE} -I${INSTANCE} --custom-location=${LAT},${LON},${ALT},${DIR} -w --frame ${MODEL} --no-rebuild --no-mavproxy --speedup ${SPEEDUP}
