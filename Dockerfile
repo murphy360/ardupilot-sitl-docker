@@ -1,6 +1,6 @@
-FROM ubuntu:18.04
+FROM ubuntu:20.04
 
-ARG COPTER_TAG=Copter-4.0.3
+ARG COPTER_TAG=Copter-4.4.3
 
 # Trick to get apt-get to not prompt for timezone in tzdata
 ARG DEBIAN_FRONTEND="noninteractive"
@@ -9,9 +9,15 @@ ARG DEBIAN_FRONTEND="noninteractive"
 RUN apt-get update -y
 
 # Install git and set it to use https instead of git protocol
-RUN apt-get install -y git gitk; git config --global url."https://github.com/".insteadOf git://github.com/
+# Need sudo and lsb-release for the installation prerequisites
+# gdb is for debugging
+RUN apt-get install -y git gitk sudo lsb-release tzdata gdb; 
+
+# Set git to use https instead of git protocol
+RUN git config --global url."https://github.com/".insteadOf git://github.com/
 
 # Now grab ArduPilot from GitHub
+# j8 is for parallelism
 RUN git clone --recurse-submodules -j8 https://github.com/ArduPilot/ardupilot.git ardupilot
 
 # Set the working directory
@@ -19,10 +25,6 @@ WORKDIR /ardupilot
 
 # Checkout the latest Copter...
 RUN git checkout ${COPTER_TAG}
-
-# Need sudo and lsb-release for the installation prerequisites
-# gdb is for debugging
-RUN apt-get install -y sudo lsb-release tzdata gdb
 
 # Need USER set so usermod does not fail...
 # Install all prerequisites now. This script is from ardupilot repository
