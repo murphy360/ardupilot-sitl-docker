@@ -52,11 +52,12 @@ RUN export ARDUPILOT_ENTRYPOINT="/home/${USER_NAME}/ardupilot_entrypoint.sh" \
 # Set the buildlogs directory into /tmp as other directory aren't accessible
 ENV BUILDLOGS=/tmp/buildlogs
 
-
-
 # Now grab ArduPilot from GitHub
 # j8 is for parallelism
-RUN git clone --recurse-submodules -j8 https://github.com/ArduPilot/ardupilot.git /${USER_NAME}
+RUN git clone --recursive https://github.com/ArduPilot/ardupilot.git /${USER_NAME}
+
+# Now start build instructions from http://ardupilot.org/dev/docs/setting-up-sitl-on-linux.html
+RUN git submodule update --init --recursive
 
 # Set the working directory
 WORKDIR /${USER_NAME}
