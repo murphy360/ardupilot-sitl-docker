@@ -31,7 +31,7 @@ RUN git checkout ${COPTER_TAG}
 #RUN USER=nobody Tools/environment_install/install-prereqs-ubuntu.sh -y 
 # force non sudo install
 USER nobody
-RUN Tools/environment_install/install-prereqs-ubuntu.sh -y -n
+RUN Tools/environment_install/install-prereqs-ubuntu.sh -y
 USER root
 # Continue build instructions from https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md
 RUN ./waf distclean
