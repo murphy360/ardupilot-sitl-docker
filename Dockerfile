@@ -30,8 +30,9 @@ RUN git checkout ${COPTER_TAG}
 # Install all prerequisites now. This script is from ardupilot repository
 #RUN USER=nobody Tools/environment_install/install-prereqs-ubuntu.sh -y 
 # force non sudo install
-RUN USER nobody Tools/environment_install/install-prereqs-ubuntu.sh -y -n
-
+USER nobody
+RUN Tools/environment_install/install-prereqs-ubuntu.sh -y -n
+USER root
 # Continue build instructions from https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md
 RUN ./waf distclean
 RUN ./waf configure --board sitl
