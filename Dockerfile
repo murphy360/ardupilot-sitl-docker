@@ -21,8 +21,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     bash-completion \ 
     git \
     apt-utils \
-    ca-certificates \
-    git config --global url."https://github.com/".insteadOf git://github.com/
+    ca-certificates
 
 # Create non root user
 ENV USER=${USER_NAME}
@@ -53,9 +52,7 @@ RUN export ARDUPILOT_ENTRYPOINT="/home/${USER_NAME}/ardupilot_entrypoint.sh" \
 # Set the buildlogs directory into /tmp as other directory aren't accessible
 ENV BUILDLOGS=/tmp/buildlogs
 
-# Cleanup
-RUN sudo apt-get clean \
-    && sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
 
 # Now grab ArduPilot from GitHub
 # j8 is for parallelism
@@ -68,7 +65,7 @@ WORKDIR /${USER_NAME}
 RUN git checkout ${COPTER_TAG}
 
 # Install the required packages
-RUN Tools/environment_install/install-prereqs-ubuntu.sh -y
+RUN /${USER_NAME}/Tools/environment_install/install-prereqs-ubuntu.sh -y
 
 # Continue build instructions from https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md
 RUN ./waf distclean
@@ -88,6 +85,9 @@ ENV MODEL +
 ENV SPEEDUP 1
 ENV VEHICLE ArduCopter
 
+# Cleanup
+RUN sudo apt-get clean \
+    && sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Finally the command
 ENTRYPOINT /ardupilot/Tools/autotest/sim_vehicle.py --vehicle ${VEHICLE} -I${INSTANCE} --custom-location=${LAT},${LON},${ALT},${DIR} -w --frame ${MODEL} --no-rebuild --no-mavproxy --speedup ${SPEEDUP}
