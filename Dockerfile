@@ -1,4 +1,4 @@
-FROM ubuntu:20.04
+FROM ubuntu:18.04
 
 ARG COPTER_TAG=Copter-4.0.3
 
@@ -12,7 +12,7 @@ RUN apt-get update -y
 RUN apt-get install -y git gitk; git config --global url."https://github.com/".insteadOf git://github.com/
 
 # Now grab ArduPilot from GitHub
-RUN git clone https://github.com/ArduPilot/ardupilot.git ardupilot
+RUN git clone --recurse-submodules https://github.com/your-github-userid/ardupilot /ardupilot
 
 # Set the working directory
 WORKDIR /ardupilot
@@ -32,7 +32,7 @@ RUN apt-get install -y sudo lsb-release tzdata gdb
 RUN USER=nobody Tools/environment_install/install-prereqs-ubuntu.sh -y 
 
 # Continue build instructions from https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md
-RUN ./waf distclean
+RUN ./waf clean
 RUN ./waf configure --board sitl
 RUN ./waf copter
 RUN ./waf rover 
