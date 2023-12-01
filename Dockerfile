@@ -6,10 +6,10 @@ ARG COPTER_TAG=Copter-4.0.3
 ARG DEBIAN_FRONTEND="noninteractive"
 
 # Update and upgrade the base system
-RUN apt update && apt upgrade -y
+RUN apt-get update -y
 
 # Install git and set it to use https instead of git protocol
-RUN apt install -y git gitk; git config --global url."https://github.com/".insteadOf git://github.com/
+RUN apt-get install -y git gitk; git config --global url."https://github.com/".insteadOf git://github.com/
 
 # Now grab ArduPilot from GitHub
 RUN git clone https://github.com/ArduPilot/ardupilot.git ardupilot
@@ -25,7 +25,7 @@ RUN git submodule update --init --recursive
 
 # Need sudo and lsb-release for the installation prerequisites
 # gdb is for debugging
-RUN apt install -y sudo lsb-release tzdata gdb
+RUN apt-get install -y sudo lsb-release tzdata gdb
 
 # Need USER set so usermod does not fail...
 # Install all prerequisites now. This script is from ardupilot repository
