@@ -28,7 +28,9 @@ RUN git checkout ${COPTER_TAG}
 
 # Need USER set so usermod does not fail...
 # Install all prerequisites now. This script is from ardupilot repository
-RUN USER=nobody Tools/environment_install/install-prereqs-ubuntu.sh -y 
+#RUN USER=nobody Tools/environment_install/install-prereqs-ubuntu.sh -y 
+# force non sudo install
+RUN USER nobody Tools/environment_install/install-prereqs-ubuntu.sh -y -n
 
 # Continue build instructions from https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md
 RUN ./waf distclean
