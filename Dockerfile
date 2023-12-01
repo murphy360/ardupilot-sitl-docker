@@ -53,8 +53,7 @@ RUN export ARDUPILOT_ENTRYPOINT="/home/${USER_NAME}/ardupilot_entrypoint.sh" \
 ENV BUILDLOGS=/tmp/buildlogs
 
 # Now grab ArduPilot from GitHub
-RUN git clone --recursive https://github.com/ArduPilot/ardupilot.git /${USER_NAME}
-
+RUN git clone https://github.com/ArduPilot/ardupilot.git /${USER_NAME}
 
 # Set the working directory
 WORKDIR /${USER_NAME}
