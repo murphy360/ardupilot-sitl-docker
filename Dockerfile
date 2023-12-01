@@ -19,20 +19,18 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     sudo \
     tzdata \
     bash-completion \ 
-    git
-
+    git \
+    apt-utils
 
 # Create non root user
 ENV USER=${USER_NAME}
 
 RUN echo "ardupilot ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USER_NAME}
 RUN chmod 0440 /etc/sudoers.d/${USER_NAME}
-RUN chown -R ${USER_NAME}:${USER_NAME} /${USER_NAME}
+#RUN chown -R ${USER_NAME}:${USER_NAME} /${USER_NAME}
 
 # Switch to non root user
 USER ${USER_NAME}
-
-
 
 # add waf alias to ardupilot waf to .ardupilot_env
 RUN echo "alias waf=\"/${USER_NAME}/waf\"" >> ~/.ardupilot_env
