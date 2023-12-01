@@ -1,6 +1,9 @@
-FROM ubuntu:18.04
+FROM ubuntu:20.04
 
 ARG COPTER_TAG=Copter-4.0.3
+
+# Trick to get apt-get to not prompt for timezone in tzdata
+ARG DEBIAN_FRONTEND="noninteractive"
 
 # Update and upgrade the base system
 RUN apt update && apt upgrade -y
@@ -19,9 +22,6 @@ RUN git checkout ${COPTER_TAG}
 
 # Now start build instructions from http://ardupilot.org/dev/docs/setting-up-sitl-on-linux.html
 RUN git submodule update --init --recursive
-
-# Trick to get apt-get to not prompt for timezone in tzdata
-ENV DEBIAN_FRONTEND=noninteractive
 
 # Need sudo and lsb-release for the installation prerequisites
 # gdb is for debugging
