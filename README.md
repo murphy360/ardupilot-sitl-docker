@@ -3,7 +3,7 @@ ArduPilot Software-in-the-Loop Simulator Docker Container
 
 The purpose of this is to run an ArduPilot SITL (Targetted at Various Vehicles) from within Docker.
 
-forked from radarku/ardupilot-sitl-docker and updated to ubuntu 20.04 and currend ardupilot tagged releases.  
+forked from radarku/ardupilot-sitl-docker and updated to Ubuntu 22.04 and currend ardupilot tagged releases.  
 updated from current dockerfile documentation from https://github.com/ArduPilot/ardupilot
 
 
