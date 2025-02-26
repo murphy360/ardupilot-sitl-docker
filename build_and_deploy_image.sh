@@ -25,7 +25,7 @@ git pull
 for dir in */ ; do
     # get dir as string
     dir_string="${dir%%*/}"
-    printf "$dir_string\n\n"
+    printf "Direcotry name ${dir_string}\n\n"
 
     if [ -f "$dir/Dockerfile" ]; then
         image_name="${base_image_name}_$($dir)"
