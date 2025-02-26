@@ -1,0 +1,48 @@
+services:
+  ardupilot_copter:
+    image: ardupilot_copter
+    container_name: ardupilot
+    tty: true
+    environment:
+      - LAT=41.3128
+      - LON=-81.4406
+      - VEHICLE=ArduCopter
+      - MODEL=+
+    ports:
+      - "5760:5760"
+
+  ardupilot_rover:
+    image: ardupilot_rover
+    container_name: ardupilot_rover
+    tty: true
+    environment:
+      - LAT=41.3128
+      - LON=-81.4406
+      - VEHICLE=APMrover2
+      - MODEL=rover
+    ports:
+      - "5761:5760"
+
+  ardupilot_plane:
+    image: ardupilot_plane
+    container_name: ardupilot_plane
+    tty: true
+    environment:
+      - LAT=41.3128
+      - LON=-81.4406
+      - VEHICLE=ArduPlane
+      - MODEL=plane
+    ports:
+      - "5762:5760"
+
+  ardupilot_sub:
+    image: ardupilot_sub
+    container_name: ardupilot_sub
+    tty: true
+    environment:
+      - LAT=41.3128
+      - LON=-81.4406
+      - VEHICLE=ArduSub
+      - MODEL=vectored
+    ports:
+      - "5763:5760"
