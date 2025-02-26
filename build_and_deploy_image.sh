@@ -23,7 +23,7 @@ git pull
 
 # Iterate through directories with Dockerfiles and build each image
 for dir in */ ; do
-    printf "New do loop/n/n/n"
+    print "New do loop/n/n/n"
     printf "$dir/n/n"
 
     if [ -f "$dir/Dockerfile" ]; then
@@ -49,5 +49,5 @@ for dir in */ ; do
 done
 
 # Run Docker Compose in detached mode
-    print_section "Running Docker Compose in detached mode
-    docker compose up -d
+print_section "Running Docker Compose in detached mode
+docker compose up -d
