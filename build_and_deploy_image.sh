@@ -23,7 +23,9 @@ git pull
 
 # Iterate through directories with Dockerfiles and build each image
 for dir in */ ; do
-    printf "$dir\n\n"
+    # get dir as string
+    dir_string="${dir%/}"
+    printf "$dir_string\n\n"
 
     if [ -f "$dir/Dockerfile" ]; then
         image_name="${base_image_name}_$($dir)"
