@@ -26,16 +26,14 @@ for dir in */ ; do
 
     dir_string=${dir##*/}
     printf "Directory name ${dir_string}\n\n"
-    # make it lowercase
-    dir_string=${dir_string,,}
-    printf "Directory name ${dir_string}\n\n"
+
 
     if [ -f "$dir/Dockerfile" ]; then
-        image_name="${base_image_name}_$($dir)"
+        image_name="${base_image_name}_$($dir_string)"
         
         # Stop and remove the Docker container
         print_section "Stopping and removing the Docker container for $image_name..."
-        docker compose -f $dir/docker-compose.yml down
+        docker down $dir_string
         docker container ls -a | grep $image_name | awk '{print $1}' | xargs docker container rm
 
         # Build the Docker image
