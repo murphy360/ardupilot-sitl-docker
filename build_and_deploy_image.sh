@@ -25,6 +25,7 @@ git pull
 for dir in */ ; do
 
     dir_string=${dir##*/}
+    printf "Directory name ${dir_string}\n\n"
     # make it lowercase
     dir_string=${dir_string,,}
     printf "Directory name ${dir_string}\n\n"
