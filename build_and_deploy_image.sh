@@ -25,8 +25,8 @@ git pull
 for dir in */ ; do
     print "Processing directory: $dir"
     # get directory name without trailing slash
-    dir_string=${dir%/}
-    printf "Direcotry name ${dir_string}\n\n"
+    dir_string=${dir##*/}
+    printf "Directory name ${dir_string}\n\n"
 
     if [ -f "$dir/Dockerfile" ]; then
         image_name="${base_image_name}_$($dir)"
