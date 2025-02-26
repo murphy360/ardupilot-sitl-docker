@@ -23,9 +23,10 @@ git pull
 
 # Iterate through directories with Dockerfiles and build each image
 for dir in */ ; do
-    print "Processing directory: $dir"
-    # get directory name without trailing slash
+
     dir_string=${dir##*/}
+    # make it lowercase
+    dir_string=${dir_string,,}
     printf "Directory name ${dir_string}\n\n"
 
     if [ -f "$dir/Dockerfile" ]; then
