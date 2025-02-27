@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Clone the ArduPilot repository with submodules
-git clone --recurse-submodules https://github.com/your-github-userid/ardupilot
+git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git
 cd ardupilot
 
 # Build the Docker image
