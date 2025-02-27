@@ -62,9 +62,6 @@ WORKDIR /${USER_NAME}
 # Checkout the latest Copter...
 RUN git checkout ${GIT_TAG}
 
-# Now start build instructions from http://ardupilot.org/dev/docs/setting-up-sitl-on-linux.html
-RUN git submodule update --init --recursive
-
 # Install the required packages
 RUN /${USER_NAME}/Tools/environment_install/install-prereqs-ubuntu.sh -y
 
