@@ -56,12 +56,7 @@ ENV BUILDLOGS=/tmp/buildlogs
 # Now grab ArduPilot from GitHub
 RUN git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git /${USER_NAME}
 
-# Log ls of ardupilot directory and wait for 30 seconds
-RUN ls -la /${USER_NAME} \
-    && sleep 30
 
-# Change the owner of the directory to non root user
-RUN chown -R ${USER_NAME}:${USER_NAME} /${USER_NAME}
 
 # Set the working directory
 WORKDIR /${USER_NAME}
