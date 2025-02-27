@@ -54,7 +54,10 @@ RUN export ARDUPILOT_ENTRYPOINT="/home/${USER_NAME}/ardupilot_entrypoint.sh" \
 ENV BUILDLOGS=/tmp/buildlogs
 
 # Now grab ArduPilot from GitHub
-RUN git clone https://github.com/ArduPilot/ardupilot.git /${USER_NAME}
+RUN git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git /${USER_NAME}
+
+# Log ls of ardupilot directory
+RUN ls -la /${USER_NAME}
 
 # Change the owner of the directory to non root user
 RUN chown -R ${USER_NAME}:${USER_NAME} /${USER_NAME}
@@ -72,12 +75,13 @@ RUN git submodule update --init --recursive
 RUN /${USER_NAME}/Tools/environment_install/install-prereqs-ubuntu.sh -y
 
 # Continue build instructions from https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md
-RUN ./waf distclean
+#RUN ./waf distclean
+RUN .waf clean
 RUN ./waf configure --board sitl
-RUN ./waf copter
+#RUN ./waf copter
 RUN ./waf rover 
-RUN ./waf plane
-RUN ./waf sub
+#RUN ./waf plane
+#RUN ./waf sub
 
 # Instance will offset your port number by 10 https://discuss.ardupilot.org/t/multiple-sitl-instance-help/65283
 ENV INSTANCE 0
