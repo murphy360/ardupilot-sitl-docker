@@ -24,11 +24,7 @@ git pull
 # Iterate through directories with Dockerfiles and build each image
 for dir in */ ; do
 
-    print_section "Processing directory: $dir"
-    printf "Directory\n\n" 
-    printf "${dir}\n\n"
-    dir_string="${dir%/}" # Remove trailing slash
-
+    print_section "Processing directory: ${dir}"
 
     result="${dir%"${dir##*[!/]}"}" # extglob-free multi-trailing-/ trim
     result="${result##*/}"                  # remove everything before the last /
