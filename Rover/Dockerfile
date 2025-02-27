@@ -58,7 +58,7 @@ RUN git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git /$
 
 RUN ls -al /${USER_NAME}
 # Set the working directory
-WORKDIR /${USER_NAME}/ardupilot
+WORKDIR /${USER_NAME}
 
 # Checkout the desired tag... 
 RUN git checkout ${GIT_TAG}
