@@ -56,6 +56,9 @@ ENV BUILDLOGS=/tmp/buildlogs
 # Now grab ArduPilot from GitHub
 RUN git clone https://github.com/ArduPilot/ardupilot.git /${USER_NAME}
 
+# Change the owner of the directory to non root user
+RUN chown -R ${USER_NAME}:${USER_NAME} /${USER_NAME}
+
 # Set the working directory
 WORKDIR /${USER_NAME}
 
@@ -84,7 +87,7 @@ ENV ALT 14
 ENV DIR 270
 ENV MODEL +
 ENV SPEEDUP 1
-ENV VEHICLE ArduCopter
+ENV VEHICLE ArduRover
 
 # Cleanup
 RUN sudo apt-get clean \
