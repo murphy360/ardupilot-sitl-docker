@@ -7,7 +7,7 @@ function print_section() {
     printf "***************************************************\n\n\n"
 }
 
-print_section "Stopping with Docker Compose"
+print_section "Stopping Running Containers with Docker Compose"
 docker compose down
 
 # Iterate through directories with Dockerfiles and build each image
@@ -21,25 +21,24 @@ for dir in */ ; do
     lower_case_directory_name="${lower_case_directory_name,,}"  # convert to lowercase
 
     if [ -f "$dir/Dockerfile" ]; then
-        image_name="${base_image_name}_${lower_case_directory_name}"
-        printf "Image name: ${image_name}\n\n"
         
-        # Stop and remove the Docker container
-        container=$(docker container ls -a | grep $image_name | awk '{print $1}') 
-        printf "Container ID: ${container}\n\n"
+        image_name="${base_image_name}_${lower_case_directory_name}"
+
+        container_id=$(docker container ls -a | grep $image_name | awk '{print $1}') 
+
 
         docker stop $image_name
         
-        if [ -n "$container" ]; then 
-            print_section "Stopping and removing the Docker container for ${container}..."
-        
-            docker container rm $container
+        if [ -n "$container_id" ]; then 
+            print_section "Stopping and removing the Docker container for ${container_id}..."
+            docker container rm $container_id
         else
-            printf "Error: Unable to find container for $image_name\n\n"
+            printf "nable to find container ${container_id} for ${image_name}\n\n"
         fi
+
         image=$(docker image ls | grep $image_name | awk '{print $3}')
         if [ -n "$image" ]; then
-            printf "Image: $image\n\n"
+            print_section "Removing the Docker image for ${image_name}..."
             docker image rm $image
         else
             printf "Error: Unable to find image for $image_name\n\n"
