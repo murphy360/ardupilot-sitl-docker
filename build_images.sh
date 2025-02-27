@@ -27,13 +27,14 @@ for dir in */ ; do
         printf "Image name: ${image_name}\n\n"
         
         # Stop and remove the Docker container
-        print_section "Stopping and removing the Docker container for $image_name..."
         container=$(docker container ls -a | grep $image_name | awk '{print $1}') 
         printf "Container ID: ${container}\n\n"
 
         docker stop $image_name
         
         if [ -n "$container" ]; then 
+            print_section "Stopping and removing the Docker container for ${container}..."
+        
             printf "Removing Container: ${container}\n\n"
             docker container rm $container
         else
