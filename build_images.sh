@@ -12,18 +12,13 @@ for dir in */ ; do
 
     print_section "Processing directory: ${dir}"
 
-    result="${dir%"${dir##*[!/]}"}" # extglob-free multi-trailing-/ trim
-
-    result="${result##*/}"                  # remove everything before the last /
-
-    result="${result:-/}"                     # correct for dirname=/ case
-
-    result="${result,,}"
-
-    printf "Directory name ${result}\n\n"
+    lower_case_directory_name="${dir%"${dir##*[!/]}"}" # extglob-free multi-trailing-/ trim
+    lower_case_directory_name="${lower_case_directory_name##*/}"  # remove everything before the last /
+    lower_case_directory_name="${lower_case_directory_name:-/}"   # correct for dirname=/ case
+    lower_case_directory_name="${lower_case_directory_name,,}"  # convert to lowercase
 
     if [ -f "$dir/Dockerfile" ]; then
-        image_name="${base_image_name}_${result}"
+        image_name="${base_image_name}_${lower_case_directory_name}"
         printf "Image name: ${image_name}\n\n"
         
         # Stop and remove the Docker container
