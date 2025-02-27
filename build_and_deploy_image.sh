@@ -28,7 +28,12 @@ for dir in */ ; do
     printf "Directory\n\n" 
     printf "${dir}\n\n"
     dir_string="${dir%/}" # Remove trailing slash
-    printf "${dir_string}"
+
+
+    result="${dir%"${dir##*[!/]}"}" # extglob-free multi-trailing-/ trim
+    result="${result##*/}"                  # remove everything before the last /
+    result=${result:-/}                     # correct for dirname=/ case
+    printf "${result}\n\n"
     printf "Directory name ${dir_string}\n\n"
 
 
