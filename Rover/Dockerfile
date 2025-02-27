@@ -56,8 +56,6 @@ ENV BUILDLOGS=/tmp/buildlogs
 # Now grab ArduPilot from GitHub
 RUN git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git /${USER_NAME}
 
-
-
 # Set the working directory
 WORKDIR /${USER_NAME}
 
