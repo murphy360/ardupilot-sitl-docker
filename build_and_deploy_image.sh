@@ -27,13 +27,13 @@ for dir in */ ; do
     print_section "Processing directory: ${dir}"
 
     result="${dir%"${dir##*[!/]}"}" # extglob-free multi-trailing-/ trim
-    printf "${result}\n\n"
+
     result="${result##*/}"                  # remove everything before the last /
-    printf "${result}\n\n"
+
     result="${result:-/}"                     # correct for dirname=/ case
-    printf "${result}\n\n"
+
     result="${result,,}"
-    printf "${result}\n\n"
+
     printf "Directory name ${result}\n\n"
 
 
