@@ -7,6 +7,9 @@ function print_section() {
     printf "***************************************************\n\n\n"
 }
 
+print_section "Stopping with Docker Compose"
+docker compose down
+
 # Iterate through directories with Dockerfiles and build each image
 for dir in */ ; do
 
@@ -30,7 +33,6 @@ for dir in */ ; do
         if [ -n "$container" ]; then 
             print_section "Stopping and removing the Docker container for ${container}..."
         
-            printf "Removing Container: ${container}\n\n"
             docker container rm $container
         else
             printf "Error: Unable to find container for $image_name\n\n"
