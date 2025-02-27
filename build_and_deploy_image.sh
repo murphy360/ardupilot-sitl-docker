@@ -44,10 +44,10 @@ for dir in */ ; do
         # Stop and remove the Docker container
         print_section "Stopping and removing the Docker container for $image_name..."
         docker ps -a | grep $image_name
-        
+        container=$(docker ps | grep $image_name | awk '{print $0}')
 
         docker stop $image_name
-        container=$(docker ps | grep $image_name | awk '{print $1}')
+        
         if [ -n "$container" ]; then 
             printf "Removing Container: ${container}\n\n"
             docker container rm $container
