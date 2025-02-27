@@ -46,7 +46,7 @@ for dir in */ ; do
         
         # Build the Docker image
         print_section "Building the Docker image for $image_name..."
-        docker build -t $image_name $dir
+        docker build --progress=plain -t $image_name $dir
 
         docker image ls | grep $image_name
     else
