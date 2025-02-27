@@ -27,7 +27,7 @@ for dir in */ ; do
     print_section "Processing directory: $dir"
     printf "Directory\n\n" 
     printf "${dir}\n\n"
-    dir_string=${dir##*/}
+    dir_string="${dir%/}" # Remove trailing slash
     printf "${dir_string}"
     printf "Directory name ${dir_string}\n\n"
 
