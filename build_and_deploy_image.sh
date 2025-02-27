@@ -26,7 +26,7 @@ for dir in */ ; do
 
     printf "Directory" 
     dir_string=${dir##*/}
-    pring "${dir_string}"
+    printf "${dir_string}"
     printf "Directory name ${dir_string}\n\n"
 
 
