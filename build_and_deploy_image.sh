@@ -54,14 +54,9 @@ for dir in */ ; do
 
         docker image ls | grep $image_name
 
-        
-
-        # Run docker logs -f
-        print_section "Running docker logs -f for $image_name..."
-        docker logs -f $image_name
     fi
 done
 
 # Run Docker Compose in detached mode
-print_section "Running Docker Compose in detached mode
+print_section "Running Docker Compose in detached mode"
 docker compose up -d

@@ -1,7 +1,7 @@
 services:
   ardupilot_copter:
     image: ardupilot_copter
-    container_name: ardupilot
+    container_name: ardupilot_copter
     tty: true
     environment:
       - LAT=41.3128
