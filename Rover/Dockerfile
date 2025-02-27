@@ -57,9 +57,9 @@ ENV BUILDLOGS=/tmp/buildlogs
 RUN git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git /${USER_NAME}
 
 # Set the working directory
-WORKDIR /${USER_NAME}
+WORKDIR /${USER_NAME}/ardupilot
 
-# Checkout the latest Copter...
+# Checkout the desired tag... 
 RUN git checkout ${GIT_TAG}
 
 # Install the required packages
@@ -69,10 +69,7 @@ RUN /${USER_NAME}/Tools/environment_install/install-prereqs-ubuntu.sh -y
 #RUN ./waf distclean
 RUN .waf clean
 RUN ./waf configure --board sitl
-#RUN ./waf copter
 RUN ./waf rover 
-#RUN ./waf plane
-#RUN ./waf sub
 
 # Instance will offset your port number by 10 https://discuss.ardupilot.org/t/multiple-sitl-instance-help/65283
 ENV INSTANCE 0
