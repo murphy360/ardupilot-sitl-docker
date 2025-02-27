@@ -24,6 +24,7 @@ git pull
 # Iterate through directories with Dockerfiles and build each image
 for dir in */ ; do
 
+    print_section "Processing directory: $dir"
     printf "Directory\n\n" 
     printf "${dir}\n\n"
     dir_string=${dir##*/}
