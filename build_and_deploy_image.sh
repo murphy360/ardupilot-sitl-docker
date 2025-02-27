@@ -45,8 +45,7 @@ for dir in */ ; do
         print_section "Stopping and removing the Docker container for $image_name..."
         container=$(docker container ls -a | grep $image_name | awk '{print $1}') 
         printf "Container ID: ${container}\n\n"
-        # Stop script now for testing purposes
-        exit 0
+
         docker stop $image_name
         
         if [ -n "$container" ]; then 
@@ -55,7 +54,7 @@ for dir in */ ; do
         else
             printf "Error: Unable to find container for $image_name\n\n"
         fi
-        image = $(docker image ls | grep $image_name | awk '{print $3}')
+        image=$(docker image ls | grep $image_name | awk '{print $3}')
         if [ -n "$image" ]; then
             printf "Image: $image\n\n"
             docker image rm $image
