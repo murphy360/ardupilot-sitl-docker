@@ -34,17 +34,19 @@ for dir in */ ; do
     printf "${result}\n\n"
     result="${result,,}"
     printf "${result}\n\n"
-    printf "Directory name ${dir_string}\n\n"
+    printf "Directory name ${result}\n\n"
 
 
     if [ -f "$dir/Dockerfile" ]; then
-        image_name="${base_image_name}_$($dir_string)"
+        image_name="${base_image_name}_$($result)"
         
         # Stop and remove the Docker container
         print_section "Stopping and removing the Docker container for $image_name..."
-        docker down $dir_string
-        docker container ls -a | grep $image_name | awk '{print $1}' | xargs docker container rm
+        docker down $image_name
+        docker container ls -a | grep $image_name | awk '{print $1}' | xargs docker container rm $image_name
+        docker image ls | grep $image_name | awk '{print $3}' | xargs docker image rm $image_name
 
+        
         # Build the Docker image
         print_section "Building the Docker image for $image_name..."
         docker build -t $image_name $dir
