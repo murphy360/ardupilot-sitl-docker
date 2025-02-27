@@ -28,8 +28,8 @@ for dir in */ ; do
 
     result="${dir%"${dir##*[!/]}"}" # extglob-free multi-trailing-/ trim
     result="${result##*/}"                  # remove everything before the last /
-    result=${result:-/}                     # correct for dirname=/ case
-    result_lowercase="${result,,}"
+    result="${result:-/}"                     # correct for dirname=/ case
+    result="${result,,}"
     printf "${result}\n\n"
     printf "Directory name ${dir_string}\n\n"
 
