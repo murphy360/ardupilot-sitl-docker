@@ -1,5 +1,7 @@
 #!/bin/bash
 
+rm -r ardupilot
+
 # Clone the ArduPilot repository with submodules
 git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git
 cd ardupilot
