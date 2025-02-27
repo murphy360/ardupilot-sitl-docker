@@ -22,8 +22,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     git \
     apt-utils \
     ca-certificates \
-    rsync \
-    gawk
+    rsync
 
 # Create non root user
 ENV USER=${USER_NAME}
