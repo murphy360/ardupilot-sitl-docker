@@ -6,7 +6,8 @@ ARG USER_NAME=ardupilot
 ARG USER_UID=1000
 ARG USER_GID=1000
 ENV CCACHE_MAXSIZE=1G
-ARG GIT_TAG=Rover-4.5.7
+ARG GIT_TAG=Rover-4.4.0 
+#ARG GIT_TAG=Rover-4.5.7
 
 # Add non root username with sudo access
 RUN groupadd ${USER_NAME} --gid ${USER_GID}\
