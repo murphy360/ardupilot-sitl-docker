@@ -38,12 +38,12 @@ for dir in */ ; do
 
 
     if [ -f "$dir/Dockerfile" ]; then
-        image_name="${base_image_name}_$($result)"
+        image_name="${base_image_name}_${result}"
         printf "Image name: ${image_name}\n\n"
         
         # Stop and remove the Docker container
         print_section "Stopping and removing the Docker container for $image_name..."
-        docker down $image_name
+        docker stop $image_name
         docker container ls -a | grep $image_name | awk '{print $1}' | xargs docker container rm $image_name
         docker image ls | grep $image_name | awk '{print $3}' | xargs docker image rm $image_name
 
