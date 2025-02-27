@@ -44,10 +44,21 @@ for dir in */ ; do
         # Stop and remove the Docker container
         print_section "Stopping and removing the Docker container for $image_name..."
         docker stop $image_name
-        docker container ls -a | grep $image_name | awk '{print $1}' | xargs docker container rm $image_name
-        docker image ls | grep $image_name | awk '{print $3}' | xargs docker image rm $image_name
-
-
+        container = $(docker container ls -a | grep $image_name | awk '{print $1}')
+        if [ -n "$container" ]; then
+            printf "Container: $container\n\n"
+            docker container rm $container
+        else
+            printf "Error: Unable to find container for $image_name\n\n"
+        fi
+        image = $(docker image ls | grep $image_name | awk '{print $3}')
+        if [ -n "$image" ]; then
+            printf "Image: $image\n\n"
+            docker image rm $image
+        else
+            printf "Error: Unable to find image for $image_name\n\n"
+        fi
+        
         # Build the Docker image
         print_section "Building the Docker image for $image_name..."
         docker build -t $image_name $dir
