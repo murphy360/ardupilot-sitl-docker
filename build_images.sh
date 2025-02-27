@@ -53,7 +53,8 @@ for dir in */ ; do
         docker build -t $image_name $dir
 
         docker image ls | grep $image_name
-
+    else
+        printf "No Dockerfile found in ${dir}... Continuing\n\n"
     fi
 done
 
