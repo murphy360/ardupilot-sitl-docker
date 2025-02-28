@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     python3-pip
 
 # Downgrade setuptools to a compatible version
-RUN pip3 install setuptools==58.0.4
+RUN pip3 install setuptools==68
 
 # Create non root user
 ENV USER=${USER_NAME}
