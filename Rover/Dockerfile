@@ -26,13 +26,14 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     python3-pip
 
 # Downgrade setuptools to a compatible version
-RUN pip3 install setuptools==68
+RUN pip3 install setuptools==58
 
 # Create non root user
 ENV USER=${USER_NAME}
 
 RUN echo "ardupilot ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USER_NAME}
 RUN chmod 0440 /etc/sudoers.d/${USER_NAME}
+
 RUN mkdir -p /${USER_NAME}
 RUN chown -R ${USER_NAME}:${USER_NAME} /${USER_NAME}
 
