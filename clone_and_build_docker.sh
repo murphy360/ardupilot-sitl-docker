@@ -11,3 +11,6 @@ docker build . -t ardupilot
 
 # Run the Docker container
 docker run --rm -it -v "$(pwd):/ardupilot" -u "$(id -u):$(id -g)" ardupilot:latest bash
+
+#Run docker in detached mode follow logs
+#docker run -d -v "$(pwd):/ardupilot" -u "$(id -u):$(id -g)" ardupilot:latest bash
