@@ -9,6 +9,9 @@ ARG WAF_TARGET=copter
 # Runtime defaults baked into the image (overridable with `docker run --env`).
 ARG SIM_VEHICLE=ArduCopter
 ARG SIM_FRAME=+
+# Start altitude (m AMSL). Sub must be 0: the simulated depth sensor measures
+# from 0 m AMSL, so anything else starts it above/below the water surface.
+ARG SIM_ALT=14
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG USER_NAME=ardupilot
@@ -71,7 +74,7 @@ RUN for v in ArduCopter ArduPlane Rover ArduSub; do ln -sf /proc/1/fd/1 /tmp/$v.
 ENV INSTANCE=0 \
     LAT=42.3898 \
     LON=-71.1476 \
-    ALT=14 \
+    ALT=${SIM_ALT} \
     DIR=270 \
     MODEL=${SIM_FRAME} \
     SPEEDUP=1 \
@@ -79,7 +82,8 @@ ENV INSTANCE=0 \
 
 EXPOSE 5760/tcp
 
+COPY --chmod=755 entrypoint.sh /usr/local/bin/sitl-entrypoint.sh
+
 # tini as PID 1 forwards `docker stop` to the whole process group (-g) and
 # reaps zombies; sim_vehicle.py as PID 1 ignores SIGTERM and gets SIGKILLed.
-# sh -c so the ENV values above expand at run time.
-ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/bin/sh", "-c", "exec /ardupilot/Tools/autotest/sim_vehicle.py --vehicle ${VEHICLE} -I${INSTANCE} --custom-location=${LAT},${LON},${ALT},${DIR} -w --frame ${MODEL} --no-rebuild --no-mavproxy --speedup ${SPEEDUP}"]
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/local/bin/sitl-entrypoint.sh"]
