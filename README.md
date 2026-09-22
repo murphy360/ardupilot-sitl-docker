@@ -1,150 +1,147 @@
-ArduPilot Software-in-the-Loop Simulator Docker Container
-=========================================================
+ArduPilot SITL Docker Images
+============================
 
-The purpose of this is to run an ArduPilot SITL (Targetted at Various Vehicles) from within Docker.
+[![CI](https://github.com/murphy360/ardupilot-sitl-docker/actions/workflows/ci.yml/badge.svg)](https://github.com/murphy360/ardupilot-sitl-docker/actions/workflows/ci.yml)
 
-forked from radarku/ardupilot-sitl-docker and updated to Ubuntu 22.04 and currend ardupilot tagged releases.  
-updated from current dockerfile documentation from https://github.com/ArduPilot/ardupilot
+Ready-to-run [ArduPilot](https://github.com/ArduPilot/ardupilot) Software-in-the-Loop simulators, one image per vehicle, built from ArduPilot's official stable releases.
 
+ArduPilot publishes CI build environments and a development container, but no runnable SITL image. This repo is the thin layer on top: it runs ArduPilot's own `install-prereqs-ubuntu.sh`, builds a single vehicle from a release tag, and starts `sim_vehicle.py` with the MAVLink TCP server on port 5760.
 
+Images
+------
 
-DockerHub
----------
+Multi-arch (`linux/amd64`, `linux/arm64`) images are published to GitHub Container Registry:
 
-A pre-built Docker image is available on DockerHub at:
+| Vehicle | Image | ArduPilot | Default `VEHICLE` / `MODEL` |
+|---------|-------|-----------|-----------------------------|
+| Copter  | `ghcr.io/murphy360/ardupilot-sitl-docker-copter` | Copter-4.7.1 | `ArduCopter` / `+` |
+| Plane   | `ghcr.io/murphy360/ardupilot-sitl-docker-plane`  | Plane-4.7.1  | `ArduPlane` / `plane` |
+| Rover   | `ghcr.io/murphy360/ardupilot-sitl-docker-rover`  | Rover-4.7.1  | `Rover` / `rover` |
+| Sub     | `ghcr.io/murphy360/ardupilot-sitl-docker-sub`    | Sub-4.7.1    | `ArduSub` / `vectored` |
 
-https://hub.docker.com/repository/docker/murphy360/ardupilot-sitl-docker (Master, shmaybe working??? Untested)
-https://hub.docker.com/repository/docker/murphy360/ardupilot-sitl-copter
-https://hub.docker.com/repository/docker/murphy360/ardupilot-sitl-plane
-https://hub.docker.com/repository/docker/murphy360/ardupilot-sitl-rover
-https://hub.docker.com/repository/docker/murphy360/ardupilot-sitl-sub
+Tags: `latest` (master), the short commit SHA, and `X.Y.Z` for `vX.Y.Z` git tags of this repo.
 
-- To download it, run `docker pull murphy360/ardupilot-sitl-docker`
-- To run it, run `docker run -it --rm -p 5760:5760 murphy360/ardupilot-sitl-docker`
-- To use it with [Docker Compose](https://docs.docker.com/compose/), add the following service to your `docker-compose.yml` file:
-    - You can launch it with `docker-compose up -d`
-    - If you update your `docker-compose.yml`, you can restart your container by running `docker-compose up -d` without getting the container ID and killing the container manually.
-    - To check the logs in `ArduCopter.log`, run `docker exec -it "$FOLDER_NAME_ardupilot-sitl_1" watch -n 1 "cat /tmp/ArduCopter.log"`, where you should update `$FOLDER_NAME` with the folder containing the `docker-compose.yml`.
-
-```yml
-services:
-    ardupilot-sitl-copter:
-        image: murphy360/ardupilot-sitl-copter
-        container_name: ardupilot
-        tty: true
-        environment:
-            - LAT=32.62354
-            - LON=-116.9456
-            - VEHICLE=ArduCopter
-            - MODEL=+
-        ports:
-            - "5760:5760"
-    ardupilot-sitl-rover:
-        image: murphy360/ardupilot-sitl-rover
-        container_name: ardupilot_rover
-        tty: true
-        environment:
-            - LAT=32.71234
-            - LON=-117.22345
-            - VEHICLE=APMrover2
-            - MODEL=rover
-        ports:
-            - "5761:5760"
-    ardupilot-sitl-plane:
-        image: murphy360/ardupilot-sitl-plane
-        container_name: ardupilot_plane
-        tty: true
-        environment:
-          - LAT=32.693993
-          - LON=-117.205200
-          - VEHICLE=ArduPlane
-          - MODEL=plane
-        ports:
-          - "5762:5760"
-    ardupilot-sitl-sub:
-        image: murphy360/ardupilot-sitl-sub
-        container_name: ardupilot_sub
-        tty: true
-        environment:
-          - LAT=32.719617
-          - LON=-117.222498
-          - VEHICLE=ArduSub
-          - MODEL=vectored
-        ports:
-          - "5763:5760"
-```
+Each image contains only its own vehicle, so `VEHICLE` must stay on that image's vehicle. `MODEL` can be any frame for that vehicle (see below).
 
 Quick Start
 -----------
 
-If you'd rather build the docker image yourself:
+```bash
+docker run -it --rm -p 5760:5760 ghcr.io/murphy360/ardupilot-sitl-docker-copter
+```
 
-`docker build --tag ardupilot github.com/murphy360/ardupilot-sitl-docker`
+Then connect a ground station or MAVProxy to TCP port 5760:
 
-You can now use the `--build-arg` option to specify which branch or tag in the ardupilot
-repository you'd like to use. Here's an example:
+```bash
+mavproxy.py --master=tcp:localhost:5760
+```
 
-`docker build --tag ardupilot --build-arg GIT_TAG=Copter-4.0.1 github.com/murphy360/ardupilot-sitl-docker` (UNTESTED as of 01DEC2023)
-
-If no COPTER_TAG is supplied, the build will use the default defined in the Dockerfile, currently set at Copter-4.4.3
-
-To run the image:
-
-`docker run -it --rm -p 5760:5760 ardupilot`
-
-This will start an ArduCopter SITL on host TCP port 5760, so to connect to it from the host, you could:
-
-`mavproxy.py --master=tcp:localhost:5760`
+The simulator's console output goes to `docker logs`.
 
 Options
 -------
 
-There are a number of options available to configure the simulator, for example, to run an ArduRover instance on port 5761, you could:
+| Variable   | Default (Copter) | Meaning |
+|------------|------------------|---------|
+| `INSTANCE` | `0`        | SITL instance number; offsets the ports by 10 × instance |
+| `LAT`      | `42.3898`  | Home latitude |
+| `LON`      | `-71.1476` | Home longitude |
+| `ALT`      | `14`       | Home altitude (m) |
+| `DIR`      | `270`      | Home heading (deg) |
+| `MODEL`    | `+`        | Frame, passed to `--frame` |
+| `SPEEDUP`  | `1`        | Simulation speed multiplier |
+| `VEHICLE`  | `ArduCopter` | Passed to `--vehicle`; leave at the image default |
 
-`docker run -it --rm -p 5761:5760 --env VEHICLE=APMrover2 ardupilot`
+For example, a skid-steer rover somewhere else, running at 2× speed:
 
-We also have an example `env.list` file which can help you maintain your options and called like so:
-
-`docker run -it --rm -p 5761:5760 --env-file env.list ardupilot`
-
-The full list of options and their default values is:
-
-```
-INSTANCE    0
-LAT         42.3898
-LON         -71.1476
-ALT         14
-DIR         270
-MODEL       +
-SPEEDUP     1
-VEHICLE     arducopter
-```
-
-So, for example, you could issue a command such as:
-
-```
+```bash
 docker run -it --rm -p 5761:5760 \
-   --env VEHICLE=APMrover2 \
    --env MODEL=rover-skid \
    --env LAT=39.9656 \
    --env LON=-75.1810 \
    --env ALT=276 \
    --env DIR=180 \
    --env SPEEDUP=2 \
-   ardupilot
+   ghcr.io/murphy360/ardupilot-sitl-docker-rover
 ```
 
-Vehicles and their corresponding models are listed below:
+The same settings can live in an env file (see [env.list](env.list)):
+
+```bash
+docker run -it --rm -p 5761:5760 --env-file env.list ghcr.io/murphy360/ardupilot-sitl-docker-rover
+```
+
+Some frames per vehicle (run `sim_vehicle.py --help` inside an image for the full list):
 
 ```
-ArduCopter: octa-quad|tri|singlecopter|firefly|gazebo-
-    iris|calibration|hexa|heli|+|heli-compound|dodeca-
-    hexa|heli-dual|coaxcopter|X|quad|y6|IrisRos|octa
-APMRover2: rover|gazebo-rover|rover-skid|calibration
-ArduSub: vectored
-ArduPlane: gazebo-zephyr|CRRCSim|last_letter|plane-
-    vtail|plane|quadplane-tilttri|quadplane|quadplane-
-    tilttrivec|calibration|plane-elevon|plane-
-    tailsitter|plane-dspoilers|quadplane-tri
-    |quadplane-cl84|jsbsim
+ArduCopter: +, X, quad, hexa, octa, octa-quad, y6, tri, heli, heli-dual, coaxcopter, singlecopter
+Rover:      rover, rover-skid, balancebot, sailboat, motorboat
+ArduPlane:  plane, plane-elevon, plane-vtail, plane-tailsitter, quadplane, quadplane-tilttri
+ArduSub:    vectored, vectored_6dof
 ```
+
+Docker Compose
+--------------
+
+```yml
+services:
+  copter:
+    image: ghcr.io/murphy360/ardupilot-sitl-docker-copter
+    tty: true
+    environment:
+      - LAT=32.62354
+      - LON=-116.9456
+    ports:
+      - "5760:5760"
+  rover:
+    image: ghcr.io/murphy360/ardupilot-sitl-docker-rover
+    tty: true
+    environment:
+      - LAT=32.71234
+      - LON=-117.22345
+    ports:
+      - "5761:5760"
+  plane:
+    image: ghcr.io/murphy360/ardupilot-sitl-docker-plane
+    tty: true
+    environment:
+      - LAT=32.693993
+      - LON=-117.205200
+    ports:
+      - "5762:5760"
+  sub:
+    image: ghcr.io/murphy360/ardupilot-sitl-docker-sub
+    tty: true
+    environment:
+      - LAT=32.719617
+      - LON=-117.222498
+    ports:
+      - "5763:5760"
+```
+
+Building locally
+----------------
+
+The single [Dockerfile](Dockerfile) builds any vehicle. It defaults to Copter:
+
+```bash
+docker build --tag ardupilot-copter .
+```
+
+Pick another vehicle or release with build args (CI's per-vehicle values are in [.github/workflows/ci.yml](.github/workflows/ci.yml)):
+
+```bash
+docker build --tag ardupilot-plane \
+   --build-arg GIT_TAG=Plane-4.7.1 \
+   --build-arg WAF_TARGET=plane \
+   --build-arg SIM_VEHICLE=ArduPlane \
+   --build-arg SIM_FRAME=plane \
+   .
+```
+
+Updating ArduPilot
+------------------
+
+Bump the `GIT_TAG` values in [.github/workflows/ci.yml](.github/workflows/ci.yml) (and the Copter default in the [Dockerfile](Dockerfile)) to the new release tags. CI builds every vehicle on both architectures and smoke-tests that the simulator starts before anything is published. Dependabot keeps the Ubuntu base image and the GitHub Actions current.
+
+Originally forked from [radarku/ardupilot-sitl-docker](https://github.com/radarku/ardupilot-sitl-docker).
