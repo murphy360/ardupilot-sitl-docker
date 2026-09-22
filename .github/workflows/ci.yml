@@ -3,9 +3,12 @@ name: CI
 on:
   push:
     branches: [master]
-    tags: ["v*.*.*"]
   pull_request:
     branches: [master]
+  # Daily check for a new ArduPilot stable release; builds only when one lands.
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,8 +18,74 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  # ArduPilot moves <Vehicle>-stable tags to each new stable release. Build from
+  # the concrete release tag they point at (e.g. Copter-4.7.1), never the moving
+  # tag itself: a changed GIT_TAG is what busts the build cache for the clone,
+  # and the release number becomes an image tag.
+  resolve:
+    name: Resolve ArduPilot stable releases
+    runs-on: ubuntu-latest
+    outputs:
+      copter: ${{ steps.resolve.outputs.copter }}
+      plane: ${{ steps.resolve.outputs.plane }}
+      rover: ${{ steps.resolve.outputs.rover }}
+      sub: ${{ steps.resolve.outputs.sub }}
+      changed: ${{ steps.published.outputs.changed }}
+    steps:
+      - name: Resolve stable tags to release tags
+        id: resolve
+        run: |
+          refs=$(git ls-remote --tags https://github.com/ArduPilot/ardupilot.git)
+          # Map every tag to the commit it points at (peeled ^{} lines win for
+          # annotated tags), then pick the <prefix>-X.Y.Z tag sharing the stable
+          # tag's commit.
+          resolve() {
+            awk -v stable="refs/tags/$1" -v pre="$2" '
+              { n=$2; sub(/\^\{\}$/,"",n); sha[n]=$1 }
+              END { s=sha[stable]; if (s=="") exit 1
+                    re="^refs/tags/" pre "-[0-9]+\\.[0-9]+\\.[0-9]+$"
+                    for (n in sha) if (sha[n]==s && n ~ re) { sub("refs/tags/","",n); print n } }
+            ' <<<"$refs" | sort -V | tail -1
+          }
+          for spec in copter:ArduCopter-stable:Copter plane:ArduPlane-stable:Plane \
+                      rover:APMrover2-stable:Rover sub:ArduSub-stable:Sub; do
+            IFS=: read -r image stable prefix <<<"$spec"
+            tag=$(resolve "$stable" "$prefix")
+            if [ -z "$tag" ]; then
+              echo "::error::Could not resolve $stable to a $prefix-X.Y.Z release tag"
+              exit 1
+            fi
+            echo "$image: $stable -> $tag"
+            echo "$image=$tag" >> "$GITHUB_OUTPUT"
+          done
+
+      # Scheduled runs skip the build when every image already has its release
+      # published. Anonymous inspect works because the packages are public.
+      - name: Check for unpublished releases
+        id: published
+        run: |
+          changed=false
+          for image in copter plane rover sub; do
+            case $image in
+              copter) tag='${{ steps.resolve.outputs.copter }}' ;;
+              plane)  tag='${{ steps.resolve.outputs.plane }}' ;;
+              rover)  tag='${{ steps.resolve.outputs.rover }}' ;;
+              sub)    tag='${{ steps.resolve.outputs.sub }}' ;;
+            esac
+            ref="${{ env.REGISTRY }}/${{ github.repository }}-$image:${tag#*-}"
+            if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
+              echo "$ref already published"
+            else
+              echo "$ref not published yet"
+              changed=true
+            fi
+          done
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build (${{ matrix.image }}, ${{ matrix.arch }})
+    needs: [resolve]
+    if: github.event_name != 'schedule' || needs.resolve.outputs.changed == 'true'
     # Native runners per arch instead of QEMU-emulating arm64 on an amd64 box: each
     # leg builds on real hardware for its own platform, in parallel, no emulation tax.
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
@@ -27,31 +96,28 @@ jobs:
       fail-fast: false
       matrix:
         # One Dockerfile for every vehicle; the build args pick the ArduPilot
-        # release, the waf target, and the image's default --vehicle/--frame.
+        # release (from the resolve job), the waf target, and the image's default
+        # --vehicle/--frame.
         arch: [amd64, arm64]
         image: [copter, plane, rover, sub]
         include:
           - image: copter
             build-args: |
-              GIT_TAG=Copter-4.7.1
               WAF_TARGET=copter
               SIM_VEHICLE=ArduCopter
               SIM_FRAME=+
           - image: plane
             build-args: |
-              GIT_TAG=Plane-4.7.1
               WAF_TARGET=plane
               SIM_VEHICLE=ArduPlane
               SIM_FRAME=plane
           - image: rover
             build-args: |
-              GIT_TAG=Rover-4.7.1
               WAF_TARGET=rover
               SIM_VEHICLE=Rover
               SIM_FRAME=rover
           - image: sub
             build-args: |
-              GIT_TAG=Sub-4.7.1
               WAF_TARGET=sub
               SIM_VEHICLE=ArduSub
               SIM_FRAME=vectored
@@ -61,13 +127,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # Every event (PR or push) builds into the local daemon first so the smoke
-      # test runs against exactly what would be published.
+      # Every event builds into the local daemon first so the smoke test runs
+      # against exactly what would be published.
       - name: Build for smoke test
         uses: docker/build-push-action@v7
         with:
           context: .
-          build-args: ${{ matrix.build-args }}
+          build-args: |
+            GIT_TAG=${{ needs.resolve.outputs[matrix.image] }}
+            ${{ matrix.build-args }}
           platforms: linux/${{ matrix.arch }}
           load: true
           tags: sitl:test
@@ -96,37 +164,39 @@ jobs:
           exit 1
 
       - name: Log in to GHCR
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Pushes: push this arch alone, tagged only by digest (no human-readable tag
-      # yet) - the publish job below merges both digests into one multi-arch
-      # manifest under the real tags (latest, sha, semver). Fully cached from the
-      # smoke-test build above, so this is just the upload.
+      # Non-PR runs: push this arch alone, tagged only by digest (no human-readable
+      # tag yet) - the publish job below merges both digests into one multi-arch
+      # manifest under the real tags. Fully cached from the smoke-test build
+      # above, so this is just the upload.
       - name: Push by digest
         id: build
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v7
         with:
           context: .
-          build-args: ${{ matrix.build-args }}
+          build-args: |
+            GIT_TAG=${{ needs.resolve.outputs[matrix.image] }}
+            ${{ matrix.build-args }}
           platforms: linux/${{ matrix.arch }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
 
       - name: Export digest
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: digests-${{ matrix.image }}-${{ matrix.arch }}
@@ -136,8 +206,8 @@ jobs:
 
   publish:
     name: Publish multi-arch manifest (${{ matrix.image }})
-    if: github.event_name == 'push'
-    needs: [build]
+    if: github.event_name != 'pull_request'
+    needs: [resolve, build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -163,6 +233,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Release tag Copter-4.7.1 -> image tags 4.7.1 and 4.7 alongside latest/sha.
+      - name: ArduPilot version
+        id: ap
+        run: |
+          tag='${{ needs.resolve.outputs[matrix.image] }}'
+          version=${tag#*-}
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -170,7 +249,8 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.image }}
           tags: |
             type=ref,event=branch
-            type=semver,pattern={{version}}
+            type=raw,value=${{ steps.ap.outputs.version }}
+            type=raw,value=${{ steps.ap.outputs.minor }}
             type=sha,prefix=,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
@@ -183,4 +263,4 @@ jobs:
 
       - name: Inspect published image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.image }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.image }}:${{ steps.ap.outputs.version }}

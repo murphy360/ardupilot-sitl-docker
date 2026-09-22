@@ -1,8 +1,10 @@
 FROM ubuntu:24.04
 
 # Which ArduPilot release to build, and which waf target to build from it.
-# CI passes these per vehicle; the defaults build Copter.
-ARG GIT_TAG=Copter-4.7.1
+# CI resolves each vehicle's moving <Vehicle>-stable tag to its release tag
+# (e.g. Copter-4.7.1) and passes that; the defaults build the latest stable
+# Copter. Locally, a moved stable tag needs --no-cache to be picked up.
+ARG GIT_TAG=ArduCopter-stable
 ARG WAF_TARGET=copter
 # Runtime defaults baked into the image (overridable with `docker run --env`).
 ARG SIM_VEHICLE=ArduCopter
