@@ -101,26 +101,33 @@ jobs:
         arch: [amd64, arm64]
         image: [copter, plane, rover, sub]
         include:
+          # reloc-alt: SIM_OPOS_ALT for the relocation smoke test. Sub's water
+          # surface is 0 m AMSL; the others just need a plausible ground level.
           - image: copter
+            reloc-alt: 5
             build-args: |
               WAF_TARGET=copter
               SIM_VEHICLE=ArduCopter
               SIM_FRAME=+
           - image: plane
+            reloc-alt: 5
             build-args: |
               WAF_TARGET=plane
               SIM_VEHICLE=ArduPlane
               SIM_FRAME=plane
           - image: rover
+            reloc-alt: 5
             build-args: |
               WAF_TARGET=rover
               SIM_VEHICLE=Rover
               SIM_FRAME=rover
           - image: sub
+            reloc-alt: 0
             build-args: |
               WAF_TARGET=sub
               SIM_VEHICLE=ArduSub
               SIM_FRAME=vectored
+              SIM_ALT=0
     steps:
       - uses: actions/checkout@v7
 
@@ -162,6 +169,20 @@ jobs:
           done
           docker logs sitl
           exit 1
+
+      # What Proteus relies on: PARAM_SET SIM_OPOS_* + MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN
+      # brings the vehicle back at the new location, and a container restart
+      # puts it back at the env (image default) location.
+      - name: Smoke test (runtime relocation over MAVLink)
+        run: |
+          docker run -d --name reloc -v "$PWD/tests:/tests:ro" sitl:test
+          trap 'docker logs reloc 2>&1 | tail -50; docker rm -f reloc >/dev/null' EXIT
+          timeout 300 docker exec reloc python3 /tests/sitl_relocate.py \
+            relocate 36.6021 -121.8947 ${{ matrix.reloc-alt }} 90
+          docker restart -t 5 reloc
+          timeout 300 docker exec reloc python3 /tests/sitl_relocate.py \
+            check 42.3898 -71.1476 270
+          trap 'docker rm -f reloc >/dev/null' EXIT
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
