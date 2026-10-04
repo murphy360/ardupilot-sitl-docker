@@ -142,6 +142,11 @@ docker build --tag ardupilot-plane \
    .
 ```
 
+Local simulator patches
+-----------------------
+
+The build applies the patches in [patches/](patches/) to ArduPilot's tree before it builds. Today there is one: the `motorboat` model gets lateral hull drag (a boat no longer slides off station) and windage (`SIM_WIND_*` pushes a motorboat while it is armed), and its default parameter file loses three lines that did nothing. [patches/README.md](patches/README.md) lists them.
+
 Updating ArduPilot
 ------------------
 
