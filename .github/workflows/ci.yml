@@ -82,6 +82,26 @@ jobs:
           done
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
+  # The torpedo core (torpedo/): pure Python, no ArduPilot build. Runs on every
+  # pull request and push, the unit tests and the code rules.
+  torpedo:
+    name: Torpedo core (ruff, pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install
+        run: |
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install --quiet ruff==0.6.9 pytest==8.3.3
+      - name: Code rules (ruff, 88 columns)
+        working-directory: torpedo
+        run: |
+          /tmp/venv/bin/ruff check .
+          /tmp/venv/bin/ruff format --check .
+      - name: Unit tests
+        working-directory: torpedo
+        run: /tmp/venv/bin/python -m pytest -q tests
+
   build:
     name: Build (${{ matrix.image }}, ${{ matrix.arch }})
     needs: [resolve]
