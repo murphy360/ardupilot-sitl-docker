@@ -15,6 +15,18 @@ from torpedo_sitl.model import load
 from torpedo_sitl.server import Config, Server
 
 M = mavutil.mavlink
+PLUGIN_NAMES = """
+SYSID_THISMAV MAV_SYSID ARMING_CHECK ARMING_SKIPCHK WP_RADIUS_M WPNAV_RADIUS
+WPNAV_RADIUS_M WP_RADIUS FS_GCS_ENABLE FS_GCS_TIMEOUT SYSID_MYGCS MAV_GCS_SYSID
+MAV_GCS_SYSID_HI SYSID_ENFORCE MAV_OPTIONS PDEAD_ACTION PDEAD_HOLD_S SCR_ENABLE
+FENCE_ENABLE FENCE_TYPE FENCE_ACTION FENCE_ALT_MIN FENCE_RADIUS FENCE_MARGIN
+BATT_MONITOR BATT_CAPACITY BATT_LOW_MAH BATT_LOW_VOLT BATT_FS_LOW_ACT BATT_CRT_MAH
+BATT_CRT_VOLT BATT_FS_CRT_ACT FS_LEAK_ENABLE LEAK1_PIN FS_PILOT_INPUT FS_PILOT_TIMEOUT
+BARO_EXT_BUS RNGFND1_TYPE RNGFND1_MAX_CM RNGFND1_MIN_CM RNGFND1_MAX RNGFND1_MIN
+EK3_SRC1_VELXY WPNAV_SPEED_UP PILOT_SPEED_UP EK3_POS_I_GATE EK3_HGT_I_GATE
+EK3_GLITCH_RAD EK3_ALT_M_NSE SIM_OPOS_LAT SIM_OPOS_LNG SIM_OPOS_ALT SIM_OPOS_HDG
+TPDO_MODEL TPDO_LOS_LA TPDO_TURN_K TPDO_LOIT_MIN
+""".split()
 MODELS = Path(__file__).resolve().parent / "models"
 HOME = (36.6, -121.9)
 WAIT_S = 20.0
@@ -59,8 +71,8 @@ class FrontSeat:
     def ports(self):
         return self.server.bound
 
-    def client(self, port_name="SERIAL0"):
-        c = Client(self.ports[port_name])
+    def client(self, port_name="SERIAL0", system=250):
+        c = Client(self.ports[port_name], system)
         self.clients.append(c)
         return c
 
@@ -80,7 +92,15 @@ class Client:
         self.m = mavutil.mavlink_connection(
             f"tcp:127.0.0.1:{port}", source_system=system, source_component=190
         )
-        self.hb = self.m.wait_heartbeat(timeout=WAIT_S)
+        self.texts = []  # what was said before the first heartbeat
+        self.hb = None
+        end = time.time() + WAIT_S
+        while self.hb is None and time.time() < end:
+            msg = self.m.recv_match(blocking=True, timeout=0.5)
+            if msg is not None and msg.get_type() == "STATUSTEXT":
+                self.texts.append(msg.text)
+            elif msg is not None and msg.get_type() == "HEARTBEAT":
+                self.hb = msg
         assert self.hb is not None, "no heartbeat"
         self.target = self.hb.get_srcSystem()
 
@@ -95,6 +115,15 @@ class Client:
             if msg is not None and (cond is None or cond(msg)):
                 return msg
         raise AssertionError(f"no {kind} within {timeout} s")
+
+    def wait_any(self, kinds, timeout=WAIT_S):
+        """The next message of any of ``kinds``."""
+        end = time.time() + timeout
+        while time.time() < end:
+            msg = self.m.recv_match(type=list(kinds), blocking=True, timeout=0.5)
+            if msg is not None:
+                return msg
+        raise AssertionError(f"none of {kinds} within {timeout} s")
 
     def fresh(self, kind, settle=0.3):
         """The latest ``kind`` message: what has queued is read first."""
@@ -120,6 +149,10 @@ class Client:
         self.m.mav.set_mode_send(
             self.target, M.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, number
         )
+
+    def beat(self):
+        """A heartbeat from this ground station (the GCS failsafe's clock)."""
+        self.m.mav.heartbeat_send(M.MAV_TYPE_GCS, M.MAV_AUTOPILOT_INVALID, 0, 0, 4)
 
     def heartbeat(self, cond=None):
         return self.wait("HEARTBEAT", cond=cond)
@@ -192,3 +225,66 @@ def run(vehicle, seconds, dt=0.05):
     """Step a vehicle ``seconds`` of vehicle time."""
     for _ in range(round(seconds / dt)):
         vehicle.step(dt)
+
+
+def waypoint(vehicle, seq, north, east, depth=6.0, radius=0.0, command=16, **p):
+    """A mission item ``north`` m north and ``east`` m east of home at ``depth``."""
+    from torpedo_sitl.mission import Item
+
+    lat, lon = vehicle.frame.to_ll(north, east)
+    return Item(
+        seq, command, M.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, int(lat * 1e7),
+        int(lon * 1e7), -depth, p.get("param1", 0.0), radius or p.get("param2", 0.0),
+        p.get("param3", 0.0), p.get("param4", 0.0),
+    )  # fmt: skip
+
+
+def plain_item(seq, command, **p):
+    """An item with no place (a DO command or a marker)."""
+    from torpedo_sitl.mission import Item
+
+    return Item(seq, command, M.MAV_FRAME_GLOBAL_RELATIVE_ALT, 0, 0, 0.0, **p)
+
+
+def home_item(vehicle):
+    """Item 0, as a client would send it."""
+    return waypoint(vehicle, 0, 0.0, 0.0, 0.0)
+
+
+def send_item(client, it, kind="MISSION_ITEM_INT"):
+    """One mission item as the client sends it."""
+    args = (
+        client.target, 1, it.seq, it.frame, it.command, 0, it.autocontinue,
+        it.param1, it.param2, it.param3, it.param4,
+    )  # fmt: skip
+    if kind == "MISSION_ITEM":
+        client.m.mav.mission_item_send(*args, it.x / 1e7, it.y / 1e7, it.z, 0)
+    else:
+        client.m.mav.mission_item_int_send(*args, it.x, it.y, it.z, 0)
+
+
+def upload_mission(client, items, duplicate=None, kind="MISSION_ITEM_INT"):
+    """Upload ``items`` (item 0 first) and return the final MISSION_ACK. ``duplicate``:
+    a seq whose item is sent twice, the way a late request is answered twice."""
+    client.m.mav.mission_count_send(client.target, 1, len(items), 0)
+    while True:
+        msg = client.wait_any(("MISSION_REQUEST_INT", "MISSION_REQUEST", "MISSION_ACK"))
+        if msg.get_type() == "MISSION_ACK":
+            if msg.type == M.MAV_MISSION_INVALID_SEQUENCE:
+                continue  # a duplicate's refusal: the upload stays open
+            return msg
+        send_item(client, items[msg.seq], kind)
+        if duplicate == msg.seq:
+            send_item(client, items[msg.seq], kind)
+            duplicate = None
+
+
+def download_mission(client):
+    """The mission the vehicle holds, as a list of MISSION_ITEM_INT messages."""
+    client.m.mav.mission_request_list_send(client.target, 1, 0)
+    count = client.wait("MISSION_COUNT").count
+    out = []
+    for seq in range(count):
+        client.m.mav.mission_request_int_send(client.target, 1, seq, 0)
+        out.append(client.wait("MISSION_ITEM_INT", cond=lambda m, s=seq: m.seq == s))
+    return out

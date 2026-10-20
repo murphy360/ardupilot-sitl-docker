@@ -1,5 +1,6 @@
-"""Smoke test for the image: arm, fly GUIDED to a point 300 m away at 4 m depth and see
-it within the waypoint radius in under 30 s of wall time (at 30x).
+"""Smoke test for the image at 30x: arm, fly GUIDED to a point 300 m away at 4 m depth
+and see it within the waypoint radius in under 30 s of wall time; then upload a
+three-point route, AUTO, and see ``MISSION_ITEM_REACHED`` for each point in under 30 s.
 
 Runs inside the container (it uses the image's pymavlink) against SERIAL0:
 
@@ -45,6 +46,42 @@ def command(m, cmd, *params):
     return need(m, "COMMAND_ACK", 10, lambda a: a.command == cmd).result
 
 
+def upload(m, items):
+    """Upload ``items`` ((lat, lon, depth) for items 1 and up; item 0 is home)."""
+    rows = [(0.0, 0.0, 0.0)] + list(items)
+    m.mav.mission_count_send(m.target_system, 1, len(rows), 0)
+    while True:
+        msg = need(m, "MISSION_REQUEST_INT", 10)
+        lat, lon, depth = rows[msg.seq]
+        m.mav.mission_item_int_send(
+            m.target_system, 1, msg.seq, M.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+            M.MAV_CMD_NAV_WAYPOINT, 0, 1, 0, 0, 0, 0,
+            int(lat * 1e7), int(lon * 1e7), -depth, 0,
+        )  # fmt: skip
+        if msg.seq == len(rows) - 1:
+            break
+    ack = need(m, "MISSION_ACK", 10)
+    if ack.type != M.MAV_MISSION_ACCEPTED:
+        raise SystemExit(f"mission refused: {ack.type}")
+
+
+def route(m, lat0, lon0, radius):
+    """Fly a three-point route in AUTO; return the wall seconds it took."""
+    d = math.degrees(80.0 / 6371000.0)
+    dlon = d / math.cos(math.radians(lat0))
+    upload(
+        m,
+        [(lat0 + d, lon0, 4.0), (lat0 + d, lon0 + dlon, 4.0), (lat0, lon0 + dlon, 4.0)],
+    )
+    if command(m, M.MAV_CMD_DO_SET_MODE, 1, 3) != M.MAV_RESULT_ACCEPTED:
+        raise SystemExit("AUTO refused")
+    start = time.time()
+    for seq in (1, 2, 3):
+        left = WALL_LIMIT_S - (time.time() - start)
+        need(m, "MISSION_ITEM_REACHED", max(left, 1), lambda r, s=seq: r.seq == s)
+    return time.time() - start
+
+
 def main():
     m = mavutil.mavlink_connection(URL, source_system=250, source_component=190)
     if m.wait_heartbeat(timeout=30) is None:
@@ -74,11 +111,13 @@ def main():
         best = min(best, math.hypot(goal[0] - n, goal[1] - e))
         if best <= radius:
             wall = time.time() - start
+            auto = route(m, g.lat / 1e7, g.lon / 1e7, radius)
             print(
                 json.dumps(
                     {
                         "reached": True,
                         "wall_s": round(wall, 1),
+                        "route_wall_s": round(auto, 1),
                         "radius_m": radius,
                         "depth_m": -g.relative_alt / 1000.0,
                     }

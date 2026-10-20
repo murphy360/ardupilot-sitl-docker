@@ -1,8 +1,10 @@
 """The parameter store: names, values, start-up lines and the saved file.
 
-Defaults are written at start from the model, the ``TPDO_*`` tuning and ArduSub 4.7's
-documented defaults (Part C2 replaces the latter with data captured from the real
-ArduSub image). ``PARAM_SET`` changes a value and saves it to
+Defaults are written at start: first the parameters captured from the real ArduSub
+image (``captured.py``), in ArduSub's index order; then the documented ArduSub defaults
+for the few names an older or newer ArduSub lacks (the plugin reads them by every name
+it has been through); then what the hull and the environment decide (identity, the
+arrival radius, the depth limit, the start position, ``TPDO_*``). ``PARAM_SET`` changes a value and saves it to
 ``/tmp/torpedo-<INSTANCE>.parm``; the file is cleared when the process starts (as the
 SITL's ``-w`` wipes its saved parameters) and read back after a reboot. Start-up lines
 come from the ``SITL_PARAMS`` environment variable and ``--param-file`` files, one
@@ -16,8 +18,9 @@ import math
 import re
 from pathlib import Path
 
-from .model import Model
+from . import captured
 from .guidance import LOITER_MIN, LOS_LA, TURN_K
+from .model import Model
 
 READ_ONLY = frozenset({"TPDO_MODEL"})
 MAX_NAME = 16
@@ -38,8 +41,38 @@ def defaults(
     heading: float,
     batt_mah: float,
 ) -> dict[str, float]:
-    """Every parameter the plugin reads for a sub, and the stand-in's own, with its
-    start value."""
+    """Every parameter and its start value: the captured ArduSub ones, the documented
+    ones the capture lacks, and what the hull and the environment decide."""
+    out = captured.params()
+    for name, value in documented(
+        model, sysid, lat, lon, alt, heading, batt_mah
+    ).items():
+        if name in MODEL_DERIVED or name not in out:
+            out[name] = value
+    return out
+
+
+MODEL_DERIVED = frozenset(
+    {
+        "SYSID_THISMAV", "MAV_SYSID", "WP_RADIUS_M", "WPNAV_RADIUS", "WPNAV_RADIUS_M",
+        "WP_RADIUS", "FENCE_ALT_MIN", "BATT_CAPACITY", "SCR_ENABLE", "SIM_OPOS_LAT",
+        "SIM_OPOS_LNG", "SIM_OPOS_ALT", "SIM_OPOS_HDG", "TPDO_MODEL", "TPDO_LOS_LA",
+        "TPDO_TURN_K", "TPDO_LOIT_MIN",
+    }
+)  # fmt: skip
+
+
+def documented(
+    model: Model,
+    sysid: int,
+    lat: float,
+    lon: float,
+    alt: float,
+    heading: float,
+    batt_mah: float,
+) -> dict[str, float]:
+    """The parameters the plugin reads for a sub, the stand-in's own and the
+    simulator's, with ArduSub 4.7's documented defaults: what the capture lacks."""
     r = model.turn_radius_m
     return {
         # identity and arrival
@@ -60,7 +93,7 @@ def defaults(
         "SYSID_ENFORCE": 0.0,
         "MAV_OPTIONS": 0.0,
         "PDEAD_ACTION": 0.0,
-        "PDEAD_HOLD_S": 0.0,
+        "PDEAD_HOLD_S": 120.0,  # the script's own default
         "SCR_ENABLE": 1.0,
         # sub
         "FENCE_ENABLE": 0.0,
@@ -104,6 +137,8 @@ def defaults(
         "TPDO_LOS_LA": LOS_LA,
         "TPDO_TURN_K": TURN_K,
         "TPDO_LOIT_MIN": LOITER_MIN,
+        # the older name of the GPS switch
+        "SIM_GPS_DISABLE": 0.0,
     }
 
 

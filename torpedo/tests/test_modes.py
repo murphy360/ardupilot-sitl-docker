@@ -13,6 +13,7 @@ DEG = math.pi / 180
 def test_modes_by_both_message_forms(front_seat):
     fs = front_seat()
     c = fs.client()
+    ready(c)
     for number in (veh.ALT_HOLD, veh.GUIDED, veh.MANUAL, veh.STABILIZE):
         c.set_mode(number)  # SET_MODE
         c.mode_is(number)
@@ -47,18 +48,20 @@ def test_arm_and_disarm(front_seat):
     c.heartbeat(lambda h: not h.base_mode & M.MAV_MODE_FLAG_SAFETY_ARMED)
 
 
-def test_arming_is_refused_in_guided_without_a_position(front_seat):
+def test_guided_is_refused_until_the_position_estimate_is_valid(front_seat):
+    """ArduSub refuses the mode (it does not refuse the arming): its own words."""
     fs = front_seat(speedup=1.0)
     c = fs.client()
-    c.set_mode(veh.GUIDED)
-    c.mode_is(veh.GUIDED)
-    res = c.command(M.MAV_CMD_COMPONENT_ARM_DISARM, 1)
+    res = c.command(M.MAV_CMD_DO_SET_MODE, 1, veh.GUIDED)
     assert res == M.MAV_RESULT_FAILED
-    text = c.m.messages["STATUSTEXT"].text  # sent just before the refusal
-    assert text.startswith("PreArm") and "Position" in text
-    assert not c.heartbeat().base_mode & M.MAV_MODE_FLAG_SAFETY_ARMED
+    text = c.wait("STATUSTEXT", cond=lambda t: t.text.startswith("Mode change"))
+    assert text.text == "Mode change failed: Guided requires position"
+    assert text.severity == M.MAV_SEVERITY_WARNING
+    assert not c.heartbeat().custom_mode == veh.GUIDED
     ready(c)  # five seconds of vehicle time later it has one
+    assert c.command(M.MAV_CMD_DO_SET_MODE, 1, veh.GUIDED) == M.MAV_RESULT_ACCEPTED
     assert c.command(M.MAV_CMD_COMPONENT_ARM_DISARM, 1) == M.MAV_RESULT_ACCEPTED
+    assert c.wait("STATUSTEXT", cond=lambda t: t.text == "Arming motors")
 
 
 def test_arming_in_alt_hold_needs_no_position(front_seat):

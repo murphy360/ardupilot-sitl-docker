@@ -2,8 +2,8 @@
 
 ``handle(server, conn, msg)`` is the one entry. Commands (``COMMAND_LONG`` and
 ``COMMAND_INT``) are each answered with a ``COMMAND_ACK``. Messages for another system
-are ignored. The mission protocol, the failsafes and the simulated world are Part C2;
-here a mission upload is refused as unsupported and a read-back is an empty mission.
+are ignored. The mission protocol (missions, AUTO, the failsafes) live in ``mission.py``, ``auto.py`` and
+``failsafe.py``; the messages of the mission protocol go to ``mission.Protocol``.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ CMD_SPEED = M.MAV_CMD_DO_CHANGE_SPEED
 CMD_REQUEST = M.MAV_CMD_REQUEST_MESSAGE
 CMD_INTERVAL = M.MAV_CMD_SET_MESSAGE_INTERVAL
 CMD_REBOOT = M.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN
+CMD_CURRENT = M.MAV_CMD_DO_SET_MISSION_CURRENT
 FORCE_ARM = 21196.0  # param2 of ARM_DISARM that skips the pre-arm checks
 REAL32 = M.MAV_PARAM_TYPE_REAL32
 
@@ -57,8 +58,10 @@ def _arm(server, conn, p) -> int:
 def _mode(server, conn, p) -> int:
     if not int(p[0]) & M.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED:
         return DENIED
-    ok, _ = server.vehicle.set_mode(int(p[1]))
-    return ACCEPTED if ok else UNSUPPORTED
+    ok, why = server.vehicle.set_mode(int(p[1]))
+    if ok:
+        return ACCEPTED
+    return UNSUPPORTED if why == "unsupported" else FAILED
 
 
 def _speed(server, conn, p) -> int:
@@ -95,7 +98,12 @@ def _reboot(server, conn, p) -> int:
     return ACCEPTED
 
 
+def _current(server, conn, p) -> int:
+    return ACCEPTED if server.vehicle.set_current_item(int(p[0])) else FAILED
+
+
 COMMANDS = {
+    CMD_CURRENT: _current,
     CMD_ARM: _arm,
     CMD_MODE: _mode,
     CMD_SPEED: _speed,
@@ -121,8 +129,8 @@ def _command(server, conn, msg) -> None:
 def _set_mode(server, conn, msg) -> None:
     if not _for_us(server, msg) or not msg.base_mode & 1:
         return
-    ok, _ = server.vehicle.set_mode(int(msg.custom_mode))
-    if not ok:
+    ok, why = server.vehicle.set_mode(int(msg.custom_mode))
+    if not ok and why == "unsupported":
         statustext(conn.mav, 4, "Mode change failed")
 
 
@@ -206,25 +214,18 @@ def _data_stream(server, conn, msg) -> None:
         conn.set_stream(msg.req_stream_id, float(rate), server.vehicle.t)
 
 
-def _mission_list(server, conn, msg) -> None:
-    if _for_us(server, msg):
-        conn.mav.mission_count_send(conn.client[0], conn.client[1], 0, msg.mission_type)
+def _heartbeat(server, conn, msg) -> None:
+    server.vehicle.heartbeat(msg.get_srcSystem())
 
 
-def _mission_refuse(server, conn, msg) -> None:
-    if _for_us(server, msg):
-        kind = getattr(msg, "mission_type", 0)
-        conn.mav.mission_ack_send(
-            conn.client[0], conn.client[1], M.MAV_MISSION_UNSUPPORTED, kind
-        )
+def _mission(name: str):
+    """A handler that gives the message to ``mission.Protocol.<name>`` if it is ours."""
 
+    def handle(server, conn, msg) -> None:
+        if _for_us(server, msg):
+            getattr(server.protocol, name)(server, conn, msg)
 
-def _mission_clear(server, conn, msg) -> None:
-    if _for_us(server, msg):
-        kind = getattr(msg, "mission_type", 0)
-        conn.mav.mission_ack_send(
-            conn.client[0], conn.client[1], M.MAV_MISSION_ACCEPTED, kind
-        )
+    return handle
 
 
 HANDLERS = {
@@ -238,9 +239,16 @@ HANDLERS = {
     "PARAM_REQUEST_LIST": _param_list,
     "PARAM_SET": _param_set,
     "REQUEST_DATA_STREAM": _data_stream,
-    "MISSION_REQUEST_LIST": _mission_list,
-    "MISSION_COUNT": _mission_refuse,
-    "MISSION_CLEAR_ALL": _mission_clear,
+    "HEARTBEAT": _heartbeat,
+    "MISSION_COUNT": _mission("count"),
+    "MISSION_ITEM_INT": _mission("item"),
+    "MISSION_ITEM": _mission("item"),
+    "MISSION_REQUEST_LIST": _mission("request_list"),
+    "MISSION_REQUEST_INT": _mission("request"),
+    "MISSION_REQUEST": _mission("request"),
+    "MISSION_CLEAR_ALL": _mission("clear"),
+    "MISSION_SET_CURRENT": _mission("set_current"),
+    "MISSION_ACK": _mission("ack"),
 }
 
 
