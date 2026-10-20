@@ -82,7 +82,7 @@ jobs:
           done
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
-  # The torpedo core (torpedo/): pure Python, no ArduPilot build. Runs on every
+  # The torpedo front seat (torpedo/): pure Python, no ArduPilot build. Runs on every
   # pull request and push, the unit tests and the code rules.
   torpedo:
     name: Torpedo core (ruff, pytest)
@@ -92,7 +92,7 @@ jobs:
       - name: Install
         run: |
           python3 -m venv /tmp/venv
-          /tmp/venv/bin/pip install --quiet ruff==0.6.9 pytest==8.3.3
+          /tmp/venv/bin/pip install --quiet ruff==0.6.9 pytest==8.3.3 pymavlink==2.4.50
       - name: Code rules (ruff, 88 columns)
         working-directory: torpedo
         run: |
@@ -101,6 +101,147 @@ jobs:
       - name: Unit tests
         working-directory: torpedo
         run: /tmp/venv/bin/python -m pytest -q tests
+
+  # The torpedo image (torpedo/Dockerfile): built per architecture on a native runner,
+  # smoke tested (no hull exits 2; a hull flies to a point 300 m away at 30x), and on a
+  # push to the default branch pushed by digest for the manifest below. It follows no
+  # ArduPilot release, so a scheduled run does not build it.
+  torpedo-image:
+    name: Torpedo image (${{ matrix.arch }})
+    needs: [torpedo]
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Build for smoke test
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: torpedo
+          file: torpedo/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: torpedo:test
+          cache-from: type=gha,scope=torpedo-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=torpedo-${{ matrix.arch }}
+
+      # With no hull the image says why and exits 2.
+      - name: Smoke test (no hull exits 2)
+        run: |
+          code=0
+          docker run --rm torpedo:test || code=$?
+          if [ "$code" != 2 ]; then
+            echo "::error::expected exit 2 with no model, got $code"
+            exit 1
+          fi
+
+      # A generic test hull at 30x: arm, GUIDED to a point 300 m away at 4 m depth,
+      # and see it within the waypoint radius in under 30 s of wall time.
+      - name: Smoke test (arm, GUIDED to a point 300 m away)
+        run: |
+          docker run -d --name torpedo -e SPEEDUP=30 \
+            -e TORPEDO_MODEL=/models/torpedo-test-small.json \
+            -v "$PWD/torpedo/tests/models:/models:ro" \
+            -v "$PWD/torpedo/tools:/tools:ro" torpedo:test
+          trap 'docker logs torpedo 2>&1 | tail -30; docker rm -f torpedo >/dev/null' EXIT
+          timeout 180 docker exec torpedo python3 /tools/smoke.py
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push by digest
+        id: build
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: torpedo
+          file: torpedo/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ github.repository }}-torpedo,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=torpedo-${{ matrix.arch }}
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: digests-torpedo-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # One multi-arch manifest under the torpedo image's tags: latest, the commit and
+  # 0.1.<run>.
+  torpedo-publish:
+    name: Publish multi-arch manifest (torpedo)
+    if: github.event_name != 'pull_request' && github.event_name != 'schedule'
+    needs: [torpedo-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: /tmp/digests
+          pattern: digests-torpedo-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-torpedo
+          tags: |
+            type=raw,value=0.1.${{ github.run_number }}
+            type=sha,prefix=,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          mapfile -t tags < <(jq -r '.tags[] | "-t", .' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          sources=()
+          for digest in *; do
+            sources+=("${{ env.REGISTRY }}/${{ github.repository }}-torpedo@sha256:$digest")
+          done
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+
+      - name: Inspect published image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ github.repository }}-torpedo:0.1.${{ github.run_number }}
 
   build:
     name: Build (${{ matrix.image }}, ${{ matrix.arch }})

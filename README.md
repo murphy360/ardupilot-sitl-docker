@@ -126,7 +126,7 @@ The torpedo (not ArduPilot)
 
 A torpedo cannot hover or move sideways. It holds speed, heading and depth on its fins and a stern thruster, follows lines and flies circles. ArduSub's position controller assumes a vehicle that can hover and push sideways, so a torpedo flown by it steers badly: it swings in S-tracks, overshoots the end of a lane and settles slowly.
 
-`torpedo/` holds a torpedo's own physics, control and guidance, in pure Python 3.12 with no dependencies. It is the core of a simulator front seat: an autopilot with a torpedo's loops, which a MAVLink layer can sit in front of. Because it runs in-process, with the physics in the same process as the control, it runs at hundreds of times real time.
+`torpedo/` is a torpedo's own front seat for a simulator: its physics, control and guidance (pure Python 3.12, no dependencies), and a MAVLink layer in front of them that speaks ArduSub's dialect, so a ground station or a vehicle interface that flies an ArduSub submarine flies it unchanged. Physics, control and MAVLink run in one process, so it runs at 30 times real time and more.
 
 | Module | What it is |
 |--------|------------|
@@ -136,17 +136,80 @@ A torpedo cannot hover or move sideways. It holds speed, heading and depth on it
 | `torpedo_sitl/guidance.py` | Lines (line of sight), corners, points and circles |
 | `torpedo_sitl/autopilot.py` | The loops and the guidance together |
 | `torpedo_sitl/check.py` | `torpedo-check <model.json>`: flies the acceptance scenarios on any model file |
+| `torpedo_sitl/vehicle.py` | The vehicle: modes, arming, targets, battery, what it knows of itself |
+| `torpedo_sitl/server.py`, `link.py`, `commands.py`, `messages.py` | The three MAVLink ports, the clock, each connection's stream rates, the commands and the telemetry |
+| `torpedo_sitl/params.py` | The parameter store and its defaults |
+| `torpedo_sitl/cli.py` | `torpedo-sitl`: starts the front seat from the SITL images' environment |
 
 A hull comes as a model file mounted at run time. The repository holds none of a real vehicle's: its tests fly two generic hulls, `torpedo-test-small` and `torpedo-test-large`, written by `torpedo/tests/models/make_fixtures.py`. A hull is known only by its id (`torpedo-100`, `torpedo-300`, and so on).
+
+### The image
+
+`ghcr.io/murphy360/ardupilot-sitl-docker-torpedo` (`linux/amd64`, `linux/arm64`; tags `latest`, the short commit sha and `0.1.<run>`) is built from [torpedo/Dockerfile](torpedo/Dockerfile) on `python:3.12-slim`. It follows no ArduPilot release. It carries `torpedo-sitl` (the entrypoint) and `torpedo-check`.
+
+```bash
+docker run -it --rm -p 5760:5760 -p 5762:5762 -p 5763:5763 \
+   -e SPEEDUP=30 -e TORPEDO_MODEL=/models/torpedo-test-small.json \
+   -v "$PWD/torpedo/tests/models:/models:ro" \
+   ghcr.io/murphy360/ardupilot-sitl-docker-torpedo
+```
+
+With no `TORPEDO_MODEL` (or a file that is not a schema-1 model) the container says why and exits 2.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `TORPEDO_MODEL` | none | Path of the hull's model file in the container. Required |
+| `INSTANCE` | `0` | Offsets the ports by 10 x instance |
+| `LAT`, `LON`, `ALT`, `DIR` | `42.3898`, `-71.1476`, `0`, `270` | Start position (deg), altitude (m AMSL, `0` is the water surface) and heading (deg). They set `SIM_OPOS_*` |
+| `SPEEDUP` | `1` | Vehicle time runs this many times wall time. Behind it (a loaded host) the front seat steps as fast as it can and falls behind, as the SITL does |
+| `SYSID` | `1` | MAVLink system id (component 1) |
+| `SITL_PARAMS` | empty | Parameter lines (`NAME VALUE`, one per line) applied at start. `--param-file` adds files |
+| `BATT_CAPACITY` | `10000` | Battery capacity (mAh). It lasts the hull's endurance at cruise |
+
+| Port | Serial | For |
+|------|--------|-----|
+| `5760 + 10 x INSTANCE` | SERIAL0 | The vehicle interface (Proteus) |
+| `5762 + 10 x INSTANCE` | SERIAL1 | QGroundControl |
+| `5763 + 10 x INSTANCE` | SERIAL2 | The referee and the world simulator (`SIM_STATE`) |
+
+All three are TCP servers, MAVLink 2, system id `SYSID`, component 1. They open at start: nothing waits for SERIAL0. A connection may close and come back at any time, and each has its own stream rates. A client sees a submarine (`MAV_TYPE_SUBMARINE`, ArduPilot's autopilot id) with a heartbeat every second of vehicle time, and `SIM_OPOS_LAT` answers, which is how a client knows it is talking to a simulator.
+
+### What it does
+
+*Modes* carry ArduSub's numbers (`SET_MODE` or `MAV_CMD_DO_SET_MODE`); any other is refused (`COMMAND_ACK` UNSUPPORTED). A torpedo cannot hover, so each mode that holds does it by circling.
+
+| Mode | Number | On a torpedo |
+|------|-------:|--------------|
+| MANUAL | 19 | `MANUAL_CONTROL` x is the thrust (0 to 1000), r the rudder, z the elevator (500 neutral). No input for 1 s: thrust 0, fins neutral |
+| STABILIZE | 0 | As MANUAL, but z is a pitch demand up to the hull's steepest pitch, held by the elevators |
+| ALT_HOLD | 2 | Holds the depth it has. Shallower than 0.5 m: motor off, it floats. Deeper: it circles the point where it entered |
+| GUIDED | 4 | A position target (point guidance, then the circle) or a velocity target (course and speed at the depth it holds; 3 s without a new one and it circles where it is). With no target it circles where it entered |
+| SURFACE | 9 | The steering speed on its heading, pitched up to rise. At the surface it switches itself to ALT_HOLD with the motor off, as ArduSub does |
+
+AUTO (3) belongs to the mission protocol, which is not in this image yet: it is refused, a mission upload is answered `MAV_MISSION_UNSUPPORTED` and a read-back is an empty mission.
+
+*Arming* (`MAV_CMD_COMPONENT_ARM_DISARM`) is refused in GUIDED or AUTO until the position estimate is valid (5 s of vehicle time after boot), with a `PreArm` text. *Targets* (`SET_POSITION_TARGET_GLOBAL_INT`) are taken in GUIDED in the frames GLOBAL_INT (depth is the home altitude less alt), GLOBAL_RELATIVE_ALT_INT (depth is -alt) and GLOBAL_TERRAIN_ALT_INT (height above a flat 50 m seabed). A position with a velocity of zero, a position alone and a velocity alone are all understood. A held point is circled for as long as it stands: sending it again does not restart it. `MAV_CMD_DO_CHANGE_SPEED` sets the speed, between the hull's steering speed and its top speed.
+
+*Commands*: `COMPONENT_ARM_DISARM`, `DO_SET_MODE`, `DO_CHANGE_SPEED`, `REQUEST_MESSAGE`, `SET_MESSAGE_INTERVAL` and `PREFLIGHT_REBOOT_SHUTDOWN`; each is answered with a `COMMAND_ACK`. `DO_ORBIT`, `NAV_TAKEOFF` and the rest are UNSUPPORTED, as ArduSub answers. A reboot (refused while armed) closes every link and starts again at `SIM_OPOS_*` with the saved parameters, which is how a client moves the simulator (see the section above).
+
+*Telemetry*, in vehicle time, by `SET_MESSAGE_INTERVAL`, by `REQUEST_DATA_STREAM` (ArduPilot's groups) and by `REQUEST_MESSAGE`: `HEARTBEAT`, `GLOBAL_POSITION_INT`, `ATTITUDE`, `SYS_STATUS`, `GPS_RAW_INT`, `EKF_STATUS_REPORT`, `BATTERY_STATUS`, `HOME_POSITION`, `SYSTEM_TIME`, `EXTENDED_SYS_STATE`, `STATUSTEXT` and `SIM_STATE` (the truth). `SYSTEM_TIME` carries the boot clock in vehicle time and `TIMESYNC` is answered. `TERRAIN_REPORT` and `WIND` are not sent.
+
+*Parameters*: `PARAM_REQUEST_READ`, `PARAM_REQUEST_LIST` and `PARAM_SET` work on the names a submarine's client reads (identity, arrival radius, failsafes, fence, battery, rangefinder, EKF sources), `SIM_OPOS_LAT/LNG/ALT/HDG`, and the front seat's own: `TPDO_MODEL` (read only: the number in the hull's id, 100 for `torpedo-100`), `TPDO_LOS_LA`, `TPDO_TURN_K` and `TPDO_LOIT_MIN`, the guidance tuning. `WP_RADIUS_M` starts at the hull's turning radius. A `PARAM_SET` is saved to `/tmp/torpedo-<INSTANCE>.parm` and kept over a reboot; the file is cleared when the container starts. A name in `SITL_PARAMS` or a parameter file that nobody knows is kept and answered.
+
+Defaults are ArduSub 4.7's documented ones. Missions, the failsafes and the simulated world (GPS, DVL, current, rangefinder, depth sensor faults) come next.
+
+### Developing
 
 ```bash
 cd torpedo
 python3 -m venv .venv && .venv/bin/pip install -e '.[test]'
-.venv/bin/pytest tests                                      # the unit tests
+.venv/bin/pytest tests                                         # the unit tests
 .venv/bin/torpedo-check tests/models/torpedo-test-small.json   # the acceptance lines on a hull
 ```
 
 The acceptance lines `torpedo-check` holds a hull to (each is a unit test too): a turn of 90 degrees reaches no more than 20 m past the lane's end; on a lane the cross-track error stays within 2 m and changes sign at most once (no S-track); it is within 2 m of the next lane 30 s after the corner; speed within 0.1 m/s and heading within 2 degrees (rms) on a straight; a ring of 30 m is flown with a median radius error of 2 m or less; a hold ring entered at 1.9 m/s stays within the ring plus 10 m. The full-rudder turning radius is measured as well and printed against the file's.
+
+CI (the `torpedo` and `torpedo-image` jobs) runs the code rules and the tests, builds the image for both architectures, and smoke tests it: arm, GUIDED to a point 300 m away at 4 m depth, and see it within the waypoint radius in under 30 s of wall time at 30x. A push to the default branch publishes the image.
 
 Docker Compose
 --------------
