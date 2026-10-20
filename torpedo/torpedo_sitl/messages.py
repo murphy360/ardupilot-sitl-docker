@@ -11,22 +11,10 @@ import math
 
 from pymavlink.dialects.v20 import ardupilotmega as mav2
 
+from . import captured
 from .vehicle import MODE_NAMES, Vehicle
 
 M = mav2
-SENSORS = (
-    M.MAV_SYS_STATUS_SENSOR_3D_GYRO
-    | M.MAV_SYS_STATUS_SENSOR_3D_ACCEL
-    | M.MAV_SYS_STATUS_SENSOR_3D_MAG
-    | M.MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE  # ArduSub: the external depth sensor
-    | M.MAV_SYS_STATUS_SENSOR_GPS
-    | M.MAV_SYS_STATUS_AHRS
-)
-# EKF_STATUS_REPORT flags: attitude, horizontal and vertical velocity, relative and
-# absolute horizontal position, absolute vertical position, predicted positions
-EKF_OK = 1 | 2 | 4 | 8 | 16 | 32 | 256 | 512
-EKF_BOOT = 1  # attitude alone, until the position estimate is valid
-GPS_SATELLITES = 10
 DEG7 = 1e7
 
 
@@ -63,7 +51,7 @@ def global_position_int(v: Vehicle, mav) -> None:
         int(lat * DEG7) if placed else 0,
         int(lon * DEG7) if placed else 0,
         int(v.altitude_msl * 1000),
-        int(-v.hull.depth * 1000),
+        int(-v.depth * 1000),
         int(n * 100),
         int(e * 100),
         int(d * 100),
@@ -78,12 +66,14 @@ def attitude(v: Vehicle, mav) -> None:
 
 
 def sys_status(v: Vehicle, mav) -> None:
-    """SYS_STATUS: the sensors and the battery."""
+    """SYS_STATUS: the sensors (the captured words of the estimator's state) and the
+    battery."""
     b = v.battery
+    present, enabled, health = v.world.sensor_words()
     mav.sys_status_send(
-        SENSORS,
-        SENSORS,
-        SENSORS,
+        present,
+        enabled,
+        health,
         100,
         int(b.voltage * 1000),
         int(b.current_ma / 10),
@@ -98,22 +88,24 @@ def sys_status(v: Vehicle, mav) -> None:
 
 
 def gps_raw_int(v: Vehicle, mav) -> None:
-    """GPS_RAW_INT: a 3D fix from boot (the truth)."""
-    lat, lon = v.latlon
+    """GPS_RAW_INT: the fix (the truth and the simulated GPS's offset), or none."""
+    fix, sats, eph = v.world.gps_fix()
     n, e, _ = _velocity(v)
     cog = int(math.degrees(math.atan2(e, n)) % 360 * 100) % 36000
+    lat, lon = v.frame.to_ll(*v.world.gps_position(v.truth)) if fix >= 2 else (0.0, 0.0)
+    alt = int(v.truth_altitude_msl * 1000) if fix >= 2 else 0
     mav.gps_raw_int_send(
         v.unix_usec,
-        3,
+        fix,
         int(lat * DEG7),
         int(lon * DEG7),
-        int(v.altitude_msl * 1000),
-        120,
+        alt,
+        eph,
         150,
         int(math.hypot(n, e) * 100),
         cog,
-        GPS_SATELLITES,
-        int(v.altitude_msl * 1000),
+        sats,
+        alt,
         1500,
         2000,
         200,
@@ -123,9 +115,19 @@ def gps_raw_int(v: Vehicle, mav) -> None:
 
 
 def ekf_status_report(v: Vehicle, mav) -> None:
-    """EKF_STATUS_REPORT: healthy once the position estimate is valid."""
-    ok = v.estimate_ok
-    mav.ekf_status_report_send(EKF_OK if ok else EKF_BOOT, 0.1, 0.1, 0.1, 0.1, 0.0, 0.0)
+    """EKF_STATUS_REPORT: the captured flags of the estimator's state, once the
+    position estimate is valid."""
+    s = captured.state(v.world.mode)
+    flags = v.world.ekf_flags(v.estimate_ok)
+    mav.ekf_status_report_send(
+        flags,
+        s["ekf_velocity_variance"],
+        s["ekf_pos_horiz_variance"],
+        s["ekf_pos_vert_variance"],
+        s["ekf_compass_variance"],
+        0.0,
+        0.0,
+    )
 
 
 def battery_status(v: Vehicle, mav) -> None:
@@ -185,7 +187,7 @@ def extended_sys_state(v: Vehicle, mav) -> None:
 def sim_state(v: Vehicle, mav) -> None:
     """SIM_STATE: the truth, for the world simulator and the referee."""
     h = v.hull
-    lat, lon = v.latlon
+    lat, lon = v.truth_latlon
     n, e, d = _velocity(v)
     q = _quaternion(h.heading, h.pitch)
     mav.sim_state_send(
@@ -201,7 +203,7 @@ def sim_state(v: Vehicle, mav) -> None:
         h.r,
         lat,
         lon,
-        v.altitude_msl,
+        v.truth_altitude_msl,
         0.0,
         0.0,
         n,
@@ -210,6 +212,47 @@ def sim_state(v: Vehicle, mav) -> None:
         int(lat * DEG7),
         int(lon * DEG7),
     )
+
+
+def mission_current(v: Vehicle, mav) -> None:
+    """MISSION_CURRENT: the item AUTO is on."""
+    m = v.mission
+    mav.mission_current_send(m.current, m.count, m.state, 0)
+
+
+def fence_status(v: Vehicle, mav) -> None:
+    """FENCE_STATUS: whether the fence is breached (ArduSub only logs it)."""
+    breached, kind, count, at = v.fence
+    mav.fence_status_send(int(breached), count, kind, at, 0)
+
+
+def _range(v: Vehicle) -> float | None:
+    """The rangefinder's reading, m, or None when it is not fitted or reads nothing."""
+    if v.params.get("RNGFND1_TYPE") == 0:
+        return None
+    r = v.world.range_m(v.hull.depth)
+    top = v.params.get("RNGFND1_MAX", v.params.get("RNGFND1_MAX_CM", 3000.0) / 100.0)
+    return r if 0.0 <= r <= top else None
+
+
+def distance_sensor(v: Vehicle, mav) -> None:
+    """DISTANCE_SENSOR: the downward rangefinder (nothing past its maximum)."""
+    r = _range(v)
+    if r is None:
+        return
+    low = int(v.params.get("RNGFND1_MIN", 0.2) * 100)
+    high = int(v.params.get("RNGFND1_MAX", 30.0) * 100)
+    mav.distance_sensor_send(
+        v.boot_ms, low, high, int(r * 100), M.MAV_DISTANCE_SENSOR_UNKNOWN, 0,
+        M.MAV_SENSOR_ROTATION_PITCH_270, 255,
+    )  # fmt: skip
+
+
+def rangefinder(v: Vehicle, mav) -> None:
+    """RANGEFINDER: the same reading, ArduPilot's own message."""
+    r = _range(v)
+    if r is not None:
+        mav.rangefinder_send(r, 0.0)
 
 
 def statustext(mav, severity: int, text: str) -> None:
@@ -229,13 +272,28 @@ BUILDERS = {
     "SYSTEM_TIME": system_time,
     "EXTENDED_SYS_STATE": extended_sys_state,
     "SIM_STATE": sim_state,
+    "MISSION_CURRENT": mission_current,
+    "FENCE_STATUS": fence_status,
+    "DISTANCE_SENSOR": distance_sensor,
+    "RANGEFINDER": rangefinder,
 }
 # ArduPilot's stream groups: what REQUEST_DATA_STREAM selects
 STREAMS = {
-    M.MAV_DATA_STREAM_EXTENDED_STATUS: ("SYS_STATUS", "GPS_RAW_INT"),
+    M.MAV_DATA_STREAM_EXTENDED_STATUS: (
+        "SYS_STATUS",
+        "GPS_RAW_INT",
+        "MISSION_CURRENT",
+        "FENCE_STATUS",
+    ),
     M.MAV_DATA_STREAM_POSITION: ("GLOBAL_POSITION_INT",),
     M.MAV_DATA_STREAM_EXTRA1: ("ATTITUDE",),
-    M.MAV_DATA_STREAM_EXTRA3: ("SYSTEM_TIME", "BATTERY_STATUS", "EKF_STATUS_REPORT"),
+    M.MAV_DATA_STREAM_EXTRA3: (
+        "SYSTEM_TIME",
+        "BATTERY_STATUS",
+        "EKF_STATUS_REPORT",
+        "DISTANCE_SENSOR",
+        "RANGEFINDER",
+    ),
 }
 STREAMS[M.MAV_DATA_STREAM_ALL] = tuple(n for g in STREAMS.values() for n in g)
 

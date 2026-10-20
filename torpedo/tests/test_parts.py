@@ -10,20 +10,7 @@ from torpedo_sitl import cli, geo
 from torpedo_sitl.battery import FULL_V, Battery
 from torpedo_sitl.params import ParamStore, defaults, model_number, parse_lines
 
-from .support import MODELS
-
-PLUGIN_NAMES = """
-SYSID_THISMAV MAV_SYSID ARMING_CHECK ARMING_SKIPCHK WP_RADIUS_M WPNAV_RADIUS
-WPNAV_RADIUS_M WP_RADIUS FS_GCS_ENABLE FS_GCS_TIMEOUT SYSID_MYGCS MAV_GCS_SYSID
-MAV_GCS_SYSID_HI SYSID_ENFORCE MAV_OPTIONS PDEAD_ACTION PDEAD_HOLD_S SCR_ENABLE
-FENCE_ENABLE FENCE_TYPE FENCE_ACTION FENCE_ALT_MIN FENCE_RADIUS FENCE_MARGIN
-BATT_MONITOR BATT_CAPACITY BATT_LOW_MAH BATT_LOW_VOLT BATT_FS_LOW_ACT BATT_CRT_MAH
-BATT_CRT_VOLT BATT_FS_CRT_ACT FS_LEAK_ENABLE LEAK1_PIN FS_PILOT_INPUT FS_PILOT_TIMEOUT
-BARO_EXT_BUS RNGFND1_TYPE RNGFND1_MAX_CM RNGFND1_MIN_CM RNGFND1_MAX RNGFND1_MIN
-EK3_SRC1_VELXY WPNAV_SPEED_UP PILOT_SPEED_UP EK3_POS_I_GATE EK3_HGT_I_GATE
-EK3_GLITCH_RAD EK3_ALT_M_NSE SIM_OPOS_LAT SIM_OPOS_LNG SIM_OPOS_ALT SIM_OPOS_HDG
-TPDO_MODEL TPDO_LOS_LA TPDO_TURN_K TPDO_LOIT_MIN
-""".split()
+from .support import MODELS, PLUGIN_NAMES
 
 
 def test_battery_lasts_the_endurance_at_cruise():
@@ -69,11 +56,11 @@ def test_store_saves_only_what_is_set_and_clears_at_start(tmp_path, hull_model):
     assert store.set("FS_GCS_ENABLE", 3.0) and not store.set("NOPE", 1.0)
     assert not store.set("TPDO_MODEL", 5.0)
     assert path.read_text().split() == ["FS_GCS_ENABLE", "3"]
-    store.values["FS_GCS_ENABLE"] = 0.0
+    store.values["FS_GCS_ENABLE"] = init["FS_GCS_ENABLE"]
     store.reload()  # a reboot: the saved value comes back
     assert store.get("FS_GCS_ENABLE") == 3.0
     again = ParamStore(init, path)  # a new process: cleared
-    assert not path.exists() and again.get("FS_GCS_ENABLE") == 0.0
+    assert not path.exists() and again.get("FS_GCS_ENABLE") == init["FS_GCS_ENABLE"]
 
 
 def test_every_name_the_plugin_reads_is_there(hull_model):

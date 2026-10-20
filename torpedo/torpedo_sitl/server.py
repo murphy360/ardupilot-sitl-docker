@@ -22,7 +22,8 @@ from pathlib import Path
 
 from . import commands
 from .link import Connection
-from .messages import statustext
+from .messages import BUILDERS, statustext
+from .mission import Protocol
 from .model import Model
 from .params import ParamStore, defaults, parse_lines
 from .vehicle import Vehicle
@@ -84,12 +85,20 @@ class Server:
         self.reboot_until: float | None = None
         self.errors: list[str] = []  # a message that failed to be handled
         self.bound: dict[str, int] = {}
+        self.protocol = Protocol()
+        self.vehicle: Vehicle | None = None
         self.vehicle = self._boot()
         self._open()
 
     def _boot(self) -> Vehicle:
+        """Start a vehicle. The mission survives a reboot, as ArduPilot's does."""
         self.boot_wall = time.monotonic()
-        return Vehicle(self.model, self.params, time.time())
+        kept = self.vehicle.mission.items if self.vehicle is not None else []
+        self.protocol = Protocol()
+        vehicle = Vehicle(self.model, self.params, time.time())
+        if len(kept) > 1:
+            vehicle.mission.replace(kept)
+        return vehicle
 
     def _open(self) -> None:
         for name, port in self.cfg.ports.items():
@@ -186,6 +195,8 @@ class Server:
     def _emit(self) -> None:
         v = self.vehicle
         texts, v.texts = v.texts, []
+        reached, v.reached = v.reached, []
+        changed, v.mission.changed = v.mission.changed, False
         for conn in self.conns:
             if not conn.greeted:
                 conn.greeted = True
@@ -193,6 +204,10 @@ class Server:
                 statustext(conn.mav, 6, text)
             for severity, text in texts:
                 statustext(conn.mav, severity, text)
+            for seq in reached:
+                conn.mav.mission_item_reached_send(seq)
+            if changed:
+                BUILDERS["MISSION_CURRENT"](v, conn.mav)
             conn.emit(v)
             conn.flush()
 

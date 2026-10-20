@@ -17,8 +17,13 @@ each does on a torpedo is written beside it:
 * SURFACE (9): the steering speed on its heading, pitched up to rise. At the surface it
   switches itself to ALT_HOLD with the motor off, as ArduSub does.
 
-AUTO (3) belongs to the mission protocol (Part C2). The position estimate is the truth
-here; it is valid ``ESTIMATE_DELAY_S`` of vehicle time after boot (a GPS fix at boot).
+* AUTO (3): the mission (``auto.py``). Refused with no mission.
+
+GUIDED and AUTO are refused (``Mode change failed: Guided requires position``, as
+ArduSub says) until the position estimate is valid: ``ESTIMATE_DELAY_S`` of vehicle
+time after boot (a GPS fix at boot). The estimate is the world's (``world.py``): the
+truth, unless the simulated GPS or DVL puts an error on it. The vehicle steers by the
+estimate; the truth is the simulator's alone (``SIM_STATE``).
 """
 
 from __future__ import annotations
@@ -26,13 +31,18 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from . import captured
+from .auto import AutoFlight
 from .autopilot import Autopilot
 from .battery import Battery
 from .control import Actuators, Command
+from .failsafe import Failsafes
 from .geo import Frame
+from .mission import FRAME_GLOBAL, NAV_WAYPOINT, Item, Mission
 from .model import Model
 from .params import ParamStore
 from .physics import Hull, clamp
+from .world import World
 
 STABILIZE, ALT_HOLD, AUTO, GUIDED, SURFACE, MANUAL = 0, 2, 3, 4, 9, 19
 MODE_NAMES = {
@@ -43,13 +53,13 @@ MODE_NAMES = {
     SURFACE: "SURFACE",
     MANUAL: "MANUAL",
 }
-SUPPORTED = (STABILIZE, ALT_HOLD, GUIDED, SURFACE, MANUAL)
+SUPPORTED = (STABILIZE, ALT_HOLD, AUTO, GUIDED, SURFACE, MANUAL)
+DEPTH_MODES = (ALT_HOLD, AUTO, GUIDED, SURFACE)  # modes that need the depth sensor
 SURFACED_M = 0.5  # shallower than this the sub is at the surface
 ESTIMATE_DELAY_S = 5.0  # a GPS fix at boot: the position estimate is valid this late
 MANUAL_TIMEOUT_S = 1.0  # no MANUAL_CONTROL for this long: thrust 0, fins neutral
 VELOCITY_TIMEOUT_S = 3.0  # no new velocity target for this long: circle where it is
 SEABED_M = 50.0  # the SITL's flat floor, for terrain-frame targets
-PREARM_NO_POSITION = "PreArm: Need Position Estimate"
 
 FRAME_GLOBAL_INT = 5
 FRAME_RELATIVE_ALT_INT = 6
@@ -82,13 +92,24 @@ class Vehicle:
         self.frame = Frame(p("SIM_OPOS_LAT"), p("SIM_OPOS_LNG"))
         self.home_alt = p("SIM_OPOS_ALT")
         self.hull = Hull(model, heading=math.radians(p("SIM_OPOS_HDG")))
+        self.world = World(params, self.frame)
+        home = Item(
+            0, NAV_WAYPOINT, FRAME_GLOBAL, int(self.frame.lat * 1e7),
+            int(self.frame.lon * 1e7), self.home_alt,
+        )  # fmt: skip
+        self.mission = Mission(home)
+        self.auto = AutoFlight(self)
+        self.failsafe = Failsafes(self)
+        self.reached: list[int] = []  # mission items reached: MISSION_ITEM_REACHED
+        self.mode_reason = "gcs"
+        self.wp_radius_override: float | None = None
+        self.fence = (False, 0, 0, 0)  # (breached, type, count, time_ms)
         self.pilot = Autopilot(model)
         self.battery = Battery(
             p("BATT_CAPACITY", 10000.0), model.endurance_h, model.cruise_speed_mps
         )
         self.t = 0.0  # vehicle time since boot, s
         self.armed = False
-        self.critical = False  # a failsafe is active (Part C2)
         self.mode = STABILIZE
         self.speed = model.cruise_speed_mps
         self.target: Target | None = None
@@ -122,33 +143,71 @@ class Vehicle:
         return self.t >= ESTIMATE_DELAY_S
 
     @property
-    def position(self) -> tuple[float, float]:
-        """(north, east) metres from home."""
+    def critical(self) -> bool:
+        """A failsafe is active (the heartbeat says CRITICAL)."""
+        return self.failsafe.active
+
+    @property
+    def truth(self) -> tuple[float, float]:
+        """(north, east) metres from home: where the hull really is."""
         return (self.hull.north, self.hull.east)
 
     @property
+    def truth_latlon(self) -> tuple[float, float]:
+        """(lat, lon) degrees: where the hull really is."""
+        return self.frame.to_ll(*self.truth)
+
+    @property
+    def position(self) -> tuple[float, float]:
+        """(north, east) metres from home: the estimate."""
+        return self.world.estimate
+
+    @property
     def latlon(self) -> tuple[float, float]:
-        """(lat, lon) degrees."""
+        """(lat, lon) degrees: the estimate."""
         return self.frame.to_ll(*self.position)
+
+    @property
+    def depth(self) -> float:
+        """The depth sensor's reading, m."""
+        return self.world.depth
 
     @property
     def altitude_msl(self) -> float:
         """Altitude above mean sea level, m (home altitude less the depth)."""
+        return self.home_alt - self.depth
+
+    @property
+    def truth_altitude_msl(self) -> float:
+        """The same, of the hull itself."""
         return self.home_alt - self.hull.depth
 
     def say(self, text: str, severity: int = 6) -> None:
         """Queue a STATUSTEXT for every link."""
         self.texts.append((severity, text))
 
+    def announce(self, line: tuple[int, str]) -> None:
+        """Queue a captured (severity, text) line."""
+        self.texts.append(line)
+
     # -- commands ---------------------------------------------------------------------
 
-    def set_mode(self, number: int) -> tuple[bool, str]:
-        """Change mode; (True, "") or (False, why)."""
+    def set_mode(self, number: int, reason: str = "gcs") -> tuple[bool, str]:
+        """Change mode; (True, "") or (False, why): "unsupported" for a number that is
+        not a mode of this vehicle, "refused" for one that cannot be entered now (said
+        on every link, in ArduSub's words). ``reason`` is who asked."""
         if number == self.mode:
+            self.mode_reason = reason
             return True, ""
         if number not in SUPPORTED:
-            return False, f"mode {number} is not supported"
-        self.mode = number
+            return False, "unsupported"
+        if number == GUIDED and not self.estimate_ok:
+            self.announce(captured.guided_refused())
+            return False, "refused"
+        if number == AUTO and not (self.estimate_ok and self.auto.start()):
+            self.announce(captured.auto_refused())
+            return False, "refused"
+        self.mode, self.mode_reason = number, reason
         self.target = None
         self._held = False
         self.pilot.control.reset()
@@ -158,12 +217,42 @@ class Vehicle:
         return True, ""
 
     def arm(self, arm: bool, force: bool = False) -> tuple[bool, str]:
-        """Arm or disarm; (True, "") or (False, the PreArm text)."""
-        if arm and not self.armed and not force:
-            if self.mode in (GUIDED, AUTO) and not self.estimate_ok:
-                return False, PREARM_NO_POSITION
+        """Arm or disarm. ArduSub refuses nothing at the surface that a torpedo can
+        see; ``force`` is kept for the command's sake."""
+        if arm and not self.armed:
+            self.announce(captured.arm_text())
+            self.failsafe.armed()
+        elif not arm and self.armed:
+            self.announce(captured.disarm_text())
         self.armed = arm
         return True, ""
+
+    # -- the mission -------------------------------------------------------------------
+
+    def new_mission(self, items: list[Item]) -> None:
+        """A finished upload. Written in AUTO, ArduPilot restarts its command."""
+        self.mission.replace(items)
+        if self.mode == AUTO:
+            self.say("Auto mission changed, restarted command", 2)
+            if not self.auto.start():
+                self.set_mode(ALT_HOLD, "mission")
+
+    def mission_cleared(self) -> None:
+        """MISSION_CLEAR_ALL: AUTO has nothing to fly any more."""
+        if self.mode == AUTO:
+            self.set_mode(ALT_HOLD, "mission")
+
+    def set_current_item(self, seq: int) -> bool:
+        """Make ``seq`` the mission's current item; in AUTO the vehicle goes to it."""
+        if not self.mission.set_current(seq):
+            return False
+        if self.mode == AUTO:
+            self.auto.start()
+        return True
+
+    def heartbeat(self, sysid: int) -> None:
+        """A HEARTBEAT from system ``sysid`` (the GCS failsafe's clock)."""
+        self.failsafe.heartbeat(sysid)
 
     def change_speed(self, mps: float) -> None:
         """``DO_CHANGE_SPEED``: the speed of the target in force, between the steering
@@ -240,15 +329,44 @@ class Vehicle:
         self._tune()
         act = self._actuators(dt) if self.armed else Actuators(0.0, 0.0, 0.0)
         self.actuators = act
-        h = self.hull
+        h, w = self.hull, self.world
+        self.current_ne = w.current
         h.step(dt, act.thrust_n, act.rudder_rad, act.elevator_rad, self.current_ne)
         self.battery.step(dt, h.speed_through_water)
+        w.step(dt, self.truth, h.velocity_ned()[:2], h.depth)
+        self.texts += w.events
+        w.events = []
+        self._depth_sensor()
+        self.failsafe.step(dt)
+        self._fence()
         if self.mode == SURFACE and h.depth < SURFACED_M:
-            self.set_mode(ALT_HOLD)  # at the surface ArduSub holds, motor off
+            self.set_mode(ALT_HOLD, "surfaced")  # at the surface ArduSub holds
+
+    def _depth_sensor(self) -> None:
+        """A lost depth sensor: ArduSub holds no depth without it and goes to MANUAL."""
+        if self.world.baro_lost and self.armed and self.mode in DEPTH_MODES:
+            self.set_mode(MANUAL, "bad_depth")
+
+    def _fence(self) -> None:
+        """Breach of the fence (the circle about home, the depth limit): shown in
+        FENCE_STATUS; ArduSub only logs it."""
+        on = self.params.get("FENCE_ENABLE") >= 0.5
+        kind, types = 0, int(self.params.get("FENCE_TYPE"))
+        n, e = self.position
+        if on and types & 8 and self.depth > -self.params.get("FENCE_ALT_MIN"):
+            kind = 1  # FENCE_BREACH_MINALT
+        elif on and types & 2 and math.hypot(n, e) > self.params.get("FENCE_RADIUS"):
+            kind = 3  # FENCE_BREACH_BOUNDARY
+        breached, _, count, at = self.fence
+        if kind and not breached:
+            count, at = count + 1, self.boot_ms
+        self.fence = (bool(kind), kind, count, at)
 
     def _tune(self) -> None:
         g, p = self.pilot.guidance, self.params.get
-        g.wp_radius = p("WP_RADIUS_M", self.model.turn_radius_m)
+        g.wp_radius = self.wp_radius_override or p(
+            "WP_RADIUS_M", self.model.turn_radius_m
+        )
         g.los_la = p("TPDO_LOS_LA")
         g.turn_k = p("TPDO_TURN_K")
         g.loiter_min = p("TPDO_LOIT_MIN")
@@ -261,6 +379,8 @@ class Vehicle:
             return self._course(dt, self._hold_heading, self.model.steer_speed_mps, 0.0)
         if mode == GUIDED:
             return self._guided(dt)
+        if mode == AUTO:
+            return self.auto.actuators(dt)
         return self._hold(dt)
 
     def _manual(self, dt: float, stabilize: bool) -> Actuators:

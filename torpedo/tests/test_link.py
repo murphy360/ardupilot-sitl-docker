@@ -36,8 +36,8 @@ def test_heartbeat_once_a_second_of_vehicle_time(front_seat):
 def test_boot_banner_names_the_hull(front_seat):
     fs = front_seat()
     c = fs.client()
-    text = c.m.messages["STATUSTEXT"].text  # sent before the first heartbeat
-    assert text.startswith("Torpedo front seat") and "torpedo-test-small" in text
+    text = next(t for t in c.texts if t.startswith("Torpedo front seat"))
+    assert "torpedo-test-small" in text
 
 
 def test_three_ports_and_no_waiting_for_serial0(front_seat):
@@ -243,7 +243,7 @@ def test_the_model_number_is_the_id_s_number_and_read_only(front_seat, tmp_path)
         c.wait("PARAM_VALUE", cond=lambda p: p.param_id == "TPDO_MODEL").param_value
         == 100
     )
-    assert "torpedo-100" in c.m.messages["STATUSTEXT"].text
+    assert any("torpedo-100" in t for t in c.texts)
 
 
 def test_reboot_keeps_parameters_and_relocates(front_seat, tmp_path):
@@ -305,17 +305,6 @@ def test_commands_for_another_system_are_ignored(front_seat):
     )
     time.sleep(0.3)
     assert not c.heartbeat().base_mode & M.MAV_MODE_FLAG_SAFETY_ARMED
-
-
-def test_mission_protocol_is_answered_but_empty(front_seat):
-    fs = front_seat()
-    c = fs.client()
-    c.m.mav.mission_request_list_send(c.target, 1, 0)
-    assert c.wait("MISSION_COUNT").count == 0
-    c.m.mav.mission_count_send(c.target, 1, 3, 0)
-    assert c.wait("MISSION_ACK").type == M.MAV_MISSION_UNSUPPORTED
-    c.m.mav.mission_clear_all_send(c.target, 1, 0)
-    assert c.wait("MISSION_ACK").type == M.MAV_MISSION_ACCEPTED
 
 
 def test_the_dialect_is_mavlink_two(front_seat):
