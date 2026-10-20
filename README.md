@@ -121,6 +121,33 @@ docker run -d --name sitl -v "$PWD/tests:/tests:ro" ghcr.io/murphy360/ardupilot-
 docker exec sitl python3 /tests/sitl_relocate.py relocate 36.6021 -121.8947 5 90 --arm
 ```
 
+The torpedo (not ArduPilot)
+---------------------------
+
+A torpedo cannot hover or move sideways. It holds speed, heading and depth on its fins and a stern thruster, follows lines and flies circles. ArduSub's position controller assumes a vehicle that can hover and push sideways, so a torpedo flown by it steers badly: it swings in S-tracks, overshoots the end of a lane and settles slowly.
+
+`torpedo/` holds a torpedo's own physics, control and guidance, in pure Python 3.12 with no dependencies. It is the core of a simulator front seat: an autopilot with a torpedo's loops, which a MAVLink layer can sit in front of. Because it runs in-process, with the physics in the same process as the control, it runs at hundreds of times real time.
+
+| Module | What it is |
+|--------|------------|
+| `torpedo_sitl/model.py` | `load(path)`: a hull's model file (schema 1, JSON); `ModelError` names a missing key |
+| `torpedo_sitl/physics.py` | `Hull`: five degrees of freedom, added mass, quadratic drag, fin lift, buoyancy, thrust that never reverses |
+| `torpedo_sitl/control.py` | Three loops: speed, heading, depth |
+| `torpedo_sitl/guidance.py` | Lines (line of sight), corners, points and circles |
+| `torpedo_sitl/autopilot.py` | The loops and the guidance together |
+| `torpedo_sitl/check.py` | `torpedo-check <model.json>`: flies the acceptance scenarios on any model file |
+
+A hull comes as a model file mounted at run time. The repository holds none of a real vehicle's: its tests fly two generic hulls, `torpedo-test-small` and `torpedo-test-large`, written by `torpedo/tests/models/make_fixtures.py`. A hull is known only by its id (`torpedo-100`, `torpedo-300`, and so on).
+
+```bash
+cd torpedo
+python3 -m venv .venv && .venv/bin/pip install -e '.[test]'
+.venv/bin/pytest tests                                      # the unit tests
+.venv/bin/torpedo-check tests/models/torpedo-test-small.json   # the acceptance lines on a hull
+```
+
+The acceptance lines `torpedo-check` holds a hull to (each is a unit test too): a turn of 90 degrees reaches no more than 20 m past the lane's end; on a lane the cross-track error stays within 2 m and changes sign at most once (no S-track); it is within 2 m of the next lane 30 s after the corner; speed within 0.1 m/s and heading within 2 degrees (rms) on a straight; a ring of 30 m is flown with a median radius error of 2 m or less; a hold ring entered at 1.9 m/s stays within the ring plus 10 m. The full-rudder turning radius is measured as well and printed against the file's.
+
 Docker Compose
 --------------
 

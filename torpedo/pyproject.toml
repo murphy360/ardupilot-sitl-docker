@@ -1,0 +1,23 @@
+[project]
+name = "torpedo-sitl"
+version = "0.1.0"
+description = "A torpedo's physics, control and guidance, for a simulator front seat"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+torpedo-check = "torpedo_sitl.check:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["torpedo_sitl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
