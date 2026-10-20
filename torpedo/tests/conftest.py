@@ -31,3 +31,20 @@ def measured(hull_name, hull_model):
     if hull_name not in _measured:
         _measured[hull_name] = check.measure(hull_model)
     return _measured[hull_name]
+
+
+@pytest.fixture
+def front_seat(tmp_path):
+    """Start front seats in threads; all are stopped at the end of the test."""
+    from .support import FrontSeat
+
+    started = []
+
+    def start(**kw):
+        fs = FrontSeat(tmp_path, **kw)
+        started.append(fs)
+        return fs
+
+    yield start
+    for fs in started:
+        fs.close()
