@@ -79,18 +79,61 @@ def test_dvl_drift_at_the_glitch_rate(hull_model):
 
 
 def test_dvl_position_error_and_noise(hull_model):
-    v, _ = _moving(
-        hull_model,
-        SIM_GPS1_ENABLE=0.0,
-        SIM_VICON_GLIT_X=3.0,
-        SIM_VICON_V_SD=0.05,
-        **DVL,
-    )
+    v, store = _moving(hull_model, SIM_GPS1_ENABLE=0.0, SIM_VICON_V_SD=0.05, **DVL)
+    run(v, 1)
+    store.values["SIM_VICON_GLIT_X"] = 3.0
     run(v, 60)
     assert v.position[0] - v.truth[0] == pytest.approx(3.0, abs=3.0)
-    v2, _ = _moving(hull_model, SIM_GPS1_ENABLE=0.0, SIM_VICON_GLIT_X=3.0, **DVL)
+    v2, store2 = _moving(hull_model, SIM_GPS1_ENABLE=0.0, **DVL)
+    run(v2, 1)
+    store2.values["SIM_VICON_GLIT_X"] = 3.0
     run(v2, 10)
     assert v2.position[0] - v2.truth[0] == pytest.approx(3.0, abs=0.2)
+
+
+def test_a_fix_holds_after_the_dive(hull_model):
+    """ArduSub's vicon simulator gives the EKF the glitch's changes, not its value: a
+    glitch set while on the GPS does not come back when the GPS goes."""
+    v, store = _moving(hull_model, SIM_VICON_GLIT_X=5.0, SIM_VICON_GLIT_Y=3.0, **DVL)
+    run(v, 10)
+    assert v.world.mode == "gps" and _error(v) < 1e-6
+    store.values["SIM_GPS1_ENABLE"] = 0.0
+    run(v, 0.05)
+    assert v.world.mode == "dvl"
+    assert _error(v) < 0.1  # no 5.8 m jump
+    run(v, 60)
+    assert _error(v) < 0.5
+
+
+def test_a_glitch_that_grows_on_the_dvl_moves_the_estimate_by_its_growth(hull_model):
+    v, store = _moving(hull_model, SIM_VICON_GLIT_X=5.0, SIM_VICON_GLIT_Y=3.0, **DVL)
+    run(v, 1)
+    store.values["SIM_GPS1_ENABLE"] = 0.0
+    run(v, 1)
+    for _ in range(20):  # the drift grows by (2, -1) m over 20 s
+        store.values["SIM_VICON_GLIT_X"] += 0.1
+        store.values["SIM_VICON_GLIT_Y"] -= 0.05
+        run(v, 1)
+    off = (v.position[0] - v.truth[0], v.position[1] - v.truth[1])
+    assert off == pytest.approx((2.0, -1.0), abs=0.2)
+
+
+def test_dvl_to_no_lock_and_back_keeps_the_estimate(hull_model):
+    v, store = _moving(hull_model, SIM_GPS1_ENABLE=0.0, **DVL)
+    run(v, 1)
+    store.values["SIM_VICON_GLIT_X"] = 4.0  # 4 m of drift while on the DVL
+    run(v, 1)
+    assert v.world.mode == "dvl"
+    store.values["SIM_VICON_TMASK"] = 0.0  # the lock goes
+    run(v, 1)
+    assert v.world.mode == "none"
+    held = v.position
+    store.values["SIM_VICON_GLIT_X"] = 9.0  # the world's glitch moves meanwhile
+    store.values["SIM_VICON_GLIT_Y"] = -2.0
+    store.values["SIM_VICON_TMASK"] = 2.0  # and the lock comes back
+    run(v, 0.05)
+    assert v.world.mode == "dvl"
+    assert math.dist(v.position, held) < 0.2  # one step of travel, no jump
 
 
 def test_with_no_gps_and_no_lock_the_position_holds(hull_model):
