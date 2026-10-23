@@ -218,6 +218,11 @@ def test_surface_rises_on_its_heading_and_then_holds_with_the_motor_off(hull_mod
     assert abs(math.remainder(v.hull.heading - heading, 2 * math.pi)) < 15 * DEG
     run(v, 5)
     assert v.actuators.thrust_n == 0.0  # the motor is off
+    for _ in range(int(300 / 0.05)):  # and it stays off: the hull floats (#8)
+        v.step(0.05)
+        assert v.actuators.thrust_n == 0.0
+    assert v.hull.depth < veh.SURFACED_M
+    assert v.hull.speed_through_water < 0.3  # it has glided to a stop
 
 
 def test_guided_with_no_target_circles_where_it_entered(hull_model):

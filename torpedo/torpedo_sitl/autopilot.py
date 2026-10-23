@@ -27,8 +27,9 @@ class Autopilot:
 
     def step(self, dt: float, hull: Hull) -> Actuators:
         """The actuators for the next ``dt`` s."""
-        course = self.guidance.course((hull.north, hull.east), dt)
-        rate = self.guidance.curvature * hull.u
+        g = self.guidance
+        course = g.course((hull.north, hull.east), dt, hull.velocity_ned()[:2])
+        rate = g.curvature * hull.u if g.rate is None else g.rate
         self.last = Command(course, self.speed, self.depth, rate)
         return self.control.update(dt, hull, self.last)
 
