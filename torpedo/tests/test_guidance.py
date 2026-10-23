@@ -37,8 +37,9 @@ def test_speed_and_heading(measured):
 
 def test_orbit_radius(measured):
     """A 30 m ring at 2 m/s: after joining, the median of |d - r| over one turn is
-    2 m or less."""
+    2 m or less, and so is the mean from the first point within 10 m of the ring."""
     assert measured["orbit_median"] <= 2.0
+    assert measured["orbit_mean"] <= 2.0
 
 
 def test_hold_ring(measured):

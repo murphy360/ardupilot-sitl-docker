@@ -8,9 +8,9 @@ each does on a torpedo is written beside it:
   and the fins neutral;
 * STABILIZE (0): as MANUAL, but z asks a pitch (up to the hull's steepest) that the
   elevators hold;
-* ALT_HOLD (2): holds the depth it has. Shallower than ``SURFACED_M`` the motor is off
-  and it floats. Deeper, it circles the point where it entered at the least loiter
-  radius and the steering speed: a torpedo cannot hover;
+* ALT_HOLD (2): holds the depth it has. Entered shallower than ``SURFACED_M``, the
+  motor is off and it floats however the hull bobs. Deeper, it circles the point where
+  it entered at the least loiter radius and the steering speed: a torpedo cannot hover;
 * GUIDED (4): a position target (point guidance, then the circle), or a velocity target
   (course and speed at the depth it holds; three seconds without a new one and it
   circles where it is). With no target it circles where it entered;
@@ -376,7 +376,8 @@ class Vehicle:
         if mode in (MANUAL, STABILIZE):
             return self._manual(dt, mode == STABILIZE)
         if mode == SURFACE:
-            return self._course(dt, self._hold_heading, self.model.steer_speed_mps, 0.0)
+            steer = self.model.steer_speed_mps
+            return self._course(dt, self._hold_heading, steer, 0.0, over_ground=False)
         if mode == GUIDED:
             return self._guided(dt)
         if mode == AUTO:
@@ -397,9 +398,10 @@ class Vehicle:
         return Actuators(thrust, rudder, elev)
 
     def _course(
-        self, dt: float, course: float, speed: float, depth: float
+        self, dt: float, course: float, speed: float, depth: float, over_ground=True
     ) -> Actuators:
-        cmd = Command(course, speed, depth)
+        """Hold ``course`` over the ground (with ``over_ground`` False: a heading)."""
+        cmd = Command(course, speed, depth, over_ground=over_ground)
         return self.pilot.control.update(dt, self.hull, cmd)
 
     def _circle_here(self) -> None:
@@ -410,14 +412,15 @@ class Vehicle:
 
     def _fly_guidance(self, dt: float, speed: float, depth: float) -> Actuators:
         g, h = self.pilot.guidance, self.hull
-        course = g.course(self.position, dt)
-        cmd = Command(course, speed, depth, g.curvature * h.u)
+        course = g.course(self.position, dt, h.velocity_ned()[:2])
+        rate = g.curvature * h.u if g.rate is None else g.rate
+        cmd = Command(course, speed, depth, rate)
         return self.pilot.control.update(dt, h, cmd)
 
     def _hold(self, dt: float) -> Actuators:
         """ALT_HOLD, and a GUIDED with nothing to fly: the depth it has, in a circle."""
-        if self.hull.depth < SURFACED_M and self._hold_depth < SURFACED_M:
-            return Actuators(0.0, 0.0, 0.0)  # at the surface: the motor is off
+        if self._hold_depth < SURFACED_M:
+            return Actuators(0.0, 0.0, 0.0)  # entered at the surface: the motor is off
         if not self._held:
             self._circle_here()
         return self._fly_guidance(dt, self.model.steer_speed_mps, self._hold_depth)

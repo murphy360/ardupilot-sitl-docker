@@ -7,7 +7,9 @@ time, no MAVLink):
 
 * a 300 m lane, a 90 degree turn and a second lane, at 1.54 and 2.30 m/s;
 * three 300 m lanes 40 m apart at 1.5 m/s (two 90 degree turns between lanes);
-* a ring of 30 m at 2 m/s, joined from 100 m out;
+* a ring of 30 m at 2 m/s, joined from 100 m out: the median radius error over a turn
+  once on it, and the mean from the first point within 10 m of it (as the vehicle
+  interface measures an orbit);
 * a hold ring of 18 m, entered at 1.9 m/s;
 * the radius of a full-rudder turn at cruise speed, against the file's.
 
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import statistics
 import sys
 from dataclasses import dataclass
 
@@ -38,6 +41,7 @@ ORBIT_SPEED = 2.0
 HOLD_RING_M = 18.0
 HOLD_SPEED = 1.9
 HOLD_OVER_M = 10.0
+JOIN_M = 10.0  # m: the vehicle interface measures a ring from this close to it
 RADIUS_TOL = 0.20
 SPEEDS = (1.54, 2.30)  # 3 knots, and a small torpedo's top speed
 UTURN_SPEED = 1.5
@@ -67,6 +71,7 @@ LINES = (
     Line("speed_rms", SPEED_RMS, "m/s", "speed error on a straight, rms"),
     Line("heading_rms", HEADING_RMS_DEG, "deg", "heading error on a straight, rms"),
     Line("orbit_median", ORBIT_M, "m", "ring of 30 m at 2 m/s, median radius error"),
+    Line("orbit_mean", ORBIT_M, "m", "the ring from 10 m off it, mean radius error"),
     Line("hold_over", HOLD_OVER_M, "m", "hold ring at 1.9 m/s, farthest past the ring"),
     Line(
         "hold_median", ORBIT_M, "m", "hold ring, median radius error after a half turn"
@@ -139,6 +144,13 @@ def _circles_trial(model: Model, out: dict) -> None:
     turn = 2 * math.pi * ring / ORBIT_SPEED
     lap = [s for s in trace.samples if joined <= s.t <= joined + turn]
     out["orbit_median"] = measures.median_radius_error(lap, (0.0, 0.0), ring)
+    near = next(
+        s.t for s in trace.samples if abs(math.hypot(s.north, s.east) - ring) <= JOIN_M
+    )
+    lap = [s for s in trace.samples if near <= s.t <= near + turn]
+    out["orbit_mean"] = statistics.mean(
+        abs(math.hypot(s.north, s.east) - ring) for s in lap
+    )
     ring = _ring(model, HOLD_RING_M)
     trace = trials.circle(
         model, (0.0, 0.0), ring, HOLD_SPEED, (-100.0, -30.0), 0.0, 400.0

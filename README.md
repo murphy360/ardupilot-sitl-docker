@@ -186,7 +186,7 @@ All three are TCP servers, MAVLink 2, system id `SYSID`, component 1. They open 
 |------|-------:|--------------|
 | MANUAL | 19 | `MANUAL_CONTROL` x is the thrust (0 to 1000), r the rudder, z the elevator (500 neutral). No input for 1 s: thrust 0, fins neutral |
 | STABILIZE | 0 | As MANUAL, but z is a pitch demand up to the hull's steepest pitch, held by the elevators |
-| ALT_HOLD | 2 | Holds the depth it has. Shallower than 0.5 m: motor off, it floats. Deeper: it circles the point where it entered |
+| ALT_HOLD | 2 | Holds the depth it has. Entered shallower than 0.5 m: motor off, it floats (and stays off however the hull bobs). Deeper: it circles the point where it entered |
 | GUIDED | 4 | A position target (point guidance, then the circle) or a velocity target (course and speed at the depth it holds; 3 s without a new one and it circles where it is). With no target it circles where it entered |
 | SURFACE | 9 | The steering speed on its heading, pitched up to rise. At the surface it switches itself to ALT_HOLD with the motor off, as ArduSub does |
 | AUTO | 3 | The mission (below). Refused with no mission |
@@ -252,7 +252,14 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[test]'
 .venv/bin/torpedo-check tests/models/torpedo-test-small.json   # the acceptance lines on a hull
 ```
 
-The acceptance lines `torpedo-check` holds a hull to (each is a unit test too): a turn of 90 degrees reaches no more than 20 m past the lane's end; on a lane the cross-track error stays within 2 m and changes sign at most once (no S-track); it is within 2 m of the next lane 30 s after the corner; speed within 0.1 m/s and heading within 2 degrees (rms) on a straight; a ring of 30 m is flown with a median radius error of 2 m or less; a hold ring entered at 1.9 m/s stays within the ring plus 10 m. The full-rudder turning radius is measured as well and printed against the file's.
+The acceptance lines `torpedo-check` holds a hull to (each is a unit test too): a turn of 90 degrees reaches no more than 20 m past the lane's end; on a lane the cross-track error stays within 2 m and changes sign at most once (no S-track); it is within 2 m of the next lane 30 s after the corner; speed within 0.1 m/s and heading within 2 degrees (rms) on a straight; a ring of 30 m is flown with a median radius error of 2 m or less, and a mean of 2 m or less from the first point within 10 m of it (as the vehicle interface measures an orbit); a hold ring entered at 1.9 m/s stays within the ring plus 10 m. The full-rudder turning radius is measured as well and printed against the file's.
+
+### How it follows a path
+
+* The course guidance asks for is a course over the ground. The heading loop holds that course less the hull's crab (the sideslip of a turn, the set of a current), so a hull in a turn or a cross current makes good the course it was given.
+* On a circle, guidance feeds the course's own turn rate forward: the hull's rate round the centre and how fast it closes on the ring. The look-ahead on a circle is half its radius, never less than the turn radius. While a turn rate is fed forward, the rudder also integrates its rate shortfall, so a steady turn has no standing error; off the circle what it learnt fades in 3 s. From farther out than 1.5 radii the hull joins on a tangent.
+* A corner of 5 to 120 degrees is rounded on an arc of `TPDO_TURN_K` turn radii (1.2 by default, never less than 1) that touches both lines. The turn starts that arc's reach before the corner, `R tan(turn / 2)`, and line of sight takes over once the hull is as far along the next line. A sharper corner (a U-turn) is turned by line of sight alone.
+* Nothing asks the hull to turn tighter than the turn radius in its model file.
 
 CI (the `torpedo` and `torpedo-image` jobs) runs the code rules and the tests, builds the image for both architectures, and smoke tests it at 30x: arm, GUIDED to a point 300 m away at 4 m depth and see it within the waypoint radius in under 30 s of wall time; then upload a three-point route, AUTO, and see `MISSION_ITEM_REACHED` for each point. A push to the default branch publishes the image.
 
