@@ -12,9 +12,13 @@ estimate is made here; nothing a vehicle's operator loads carries it.
 * a DVL (fitted when ``VISO_TYPE`` is set and ``EK3_SRC1_VELXY`` is 6): locked when
   ``SIM_VICON_TMASK`` has bit 1 or 3 (2 or 8). With the GPS off, the estimate
   dead-reckons on the true velocity plus ``SIM_VICON_VGLI_X/Y`` (m/s north, east) and
-  noise ``SIM_VICON_V_SD`` (m/s, one sigma), and carries ``SIM_VICON_GLIT_X/Y`` (m) as a
-  steady position error. With no GPS and no lock it holds its last position (EKF3's
-  ``const_pos_mode``). A fix snaps the estimate back to the GPS;
+  noise ``SIM_VICON_V_SD`` (m/s, one sigma), and moves by each *change* of
+  ``SIM_VICON_GLIT_X/Y`` (m), as ArduSub's vicon simulator gives the EKF position
+  changes of a position offset by the glitch. The glitch's value is taken as the
+  baseline whenever the estimator comes onto the DVL (from the GPS or from no lock),
+  so a glitch that is never cleared does not undo a fix. With no GPS and no lock it
+  holds its last position (EKF3's ``const_pos_mode``). A fix snaps the estimate back
+  to the GPS;
 * ``SIM_SONAR_POS_Z``: the rangefinder reads ``50 - SIM_SONAR_POS_Z - depth``, the
   SITL's flat 50 m floor;
 * ``SIM_BARO_DISABLE``: the depth sensor fails; the estimate's depth freezes.
@@ -48,6 +52,7 @@ class World:
         self.north = self.east = 0.0  # the estimator's own integration
         self.depth = 0.0  # the estimate's depth
         self.mode = GPS
+        self.glit = (0.0, 0.0)  # SIM_VICON_GLIT_X/Y at the last step on the DVL
         self.baro_lost = False
         self.events: list[tuple[int, str]] = []  # STATUSTEXT: (severity, text)
 
@@ -105,9 +110,11 @@ class World:
         self._sensors(depth)
         gps, locked = self.gps_on, self.dvl_locked
         mode = GPS if gps else DVL if locked else NONE
+        glit = self._p("SIM_VICON_GLIT_X"), self._p("SIM_VICON_GLIT_Y")
         if mode != self.mode:
             self.events += self._said(self.mode, mode)
             self.mode = mode
+            self.glit = glit  # the new baseline: only its changes move the estimate
         if mode == GPS:
             off = self.gps_offset
             self.north, self.east = truth_ne[0] + off[0], truth_ne[1] + off[1]
@@ -115,8 +122,9 @@ class World:
             sd = self._p("SIM_VICON_V_SD")
             vn = velocity_ne[0] + self._p("SIM_VICON_VGLI_X") + self.rng.gauss(0.0, sd)
             ve = velocity_ne[1] + self._p("SIM_VICON_VGLI_Y") + self.rng.gauss(0.0, sd)
-            self.north += vn * dt
-            self.east += ve * dt
+            self.north += vn * dt + glit[0] - self.glit[0]
+            self.east += ve * dt + glit[1] - self.glit[1]
+            self.glit = glit
         # no GPS and no lock: the position holds
 
     def _sensors(self, depth: float) -> None:
@@ -141,10 +149,6 @@ class World:
     @property
     def estimate(self) -> tuple[float, float]:
         """The estimated position, (north, east) m from home."""
-        if self.mode == DVL:
-            return self.north + self._p("SIM_VICON_GLIT_X"), self.east + self._p(
-                "SIM_VICON_GLIT_Y"
-            )
         return self.north, self.east
 
     def gps_position(self, truth_ne: tuple[float, float]) -> tuple[float, float]:
