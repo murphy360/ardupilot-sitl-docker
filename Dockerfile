@@ -45,6 +45,12 @@ WORKDIR /${USER_NAME}
 RUN git clone --depth 1 --branch ${GIT_TAG} https://github.com/ArduPilot/ardupilot.git . \
     && git submodule update --init --recursive --depth 1
 
+# Our changes to the simulator (patches/, applied in name order): the motorboat's
+# hull damps sideslip (murphy360/Proteus#864, #2252). A patch that no longer applies
+# to a new release fails the build here.
+COPY --chown=${USER_NAME}:${USER_NAME} patches/ /tmp/patches/
+RUN for p in /tmp/patches/*.patch; do git apply "$p" || exit 1; done
+
 # ArduPilot's own dependency installer, trimmed to what SITL needs: no GUI
 # (MAVProxy map/console), no coverage tools, no STM32 firmware toolchain.
 RUN SKIP_AP_EXT_ENV=1 SKIP_AP_GRAPHIC_ENV=1 SKIP_AP_COV_ENV=1 SKIP_AP_GIT_CHECK=1 \

@@ -26,6 +26,8 @@ Tags:
 
 Each image contains only its own vehicle, so `VEHICLE` must stay on that image's vehicle. `MODEL` can be any frame for that vehicle (see below).
 
+**Our changes to the simulator.** The build applies `patches/*.patch` to the ArduPilot release, in name order; a patch that no longer applies fails the build. `0001-motorboat-hull-drag.patch` gives the `motorboat` frame lateral hull drag. The stock model drags only along the hull, so a boat holding a point slides off it: its sideslip grows to about 1 m/s in 15 simulated minutes. With the patch it stays near 0.1 m/s. The patch also adds the wind's push on the hull, and drops `motorboat.parm`'s default 3 m/s wind, so a boat is calm unless you set `SIM_WIND_SPD`. `tests/hull_sideslip.py` checks it in CI (murphy360/Proteus#864, #2252).
+
 Quick Start
 -----------
 

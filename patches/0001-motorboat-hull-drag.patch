@@ -1,0 +1,64 @@
+diff --git a/Tools/autotest/default_params/motorboat.parm b/Tools/autotest/default_params/motorboat.parm
+index 4de5fca..3d8b60c 100644
+--- a/Tools/autotest/default_params/motorboat.parm
++++ b/Tools/autotest/default_params/motorboat.parm
+@@ -1,5 +1,2 @@
+ FRAME_CLASS 2
+-SIM_TIDE_0.5
+-SIM_WIND_SPD 3
+-SIM_WIND_T 1
+ SIM_WAVE_ENABLE 1
+diff --git a/libraries/SITL/SIM_Sailboat.cpp b/libraries/SITL/SIM_Sailboat.cpp
+index 103d777..da50193 100644
+--- a/libraries/SITL/SIM_Sailboat.cpp
++++ b/libraries/SITL/SIM_Sailboat.cpp
+@@ -40,6 +40,17 @@ namespace SITL {
+ #define WAVE_ANGLE_GAIN 1
+ #define WAVE_HEAVE_GAIN 1
+ 
++// lateral hull drag (N per m/s, and N per (m/s)^2): a hull resists moving
++// sideways far more than moving ahead (the ahead drag below is 0.5 v^2). The
++// linear term damps a small sideslip with a time constant of mass / 2 = 1 s;
++// the quadratic term, ten times the ahead drag, dominates at speed.
++#define HULL_LAT_DRAG_LIN  2.0f
++#define HULL_LAT_DRAG_QUAD 5.0f
++// windage of a boat without a sail (N per (m/s)^2 of air speed over the hull):
++// a 10 m/s wind sets a free boat drifting at about 0.2 m/s beam on and
++// 0.8 m/s end on (the hull drags far less ahead than abeam)
++#define HULL_WINDAGE       0.004f
++
+ Sailboat::Sailboat(const char *frame_str) :
+     Aircraft(frame_str),
+     sail_area(1.0),
+@@ -285,7 +296,13 @@ void Sailboat::update(const struct sitl_input &input)
+     }
+ 
+     // accel in body frame due acceleration from sail and deceleration from hull friction
+-    accel_body = Vector3f((throttle_force + force_fwd) - hull_drag, 0, 0);
++    // sideways drag: without it a sideslip left by a turn (or by integration
++    // error) is never damped and the boat slides off station
++    const float sideslip = velocity_body.y;
++    const float hull_drag_lat = HULL_LAT_DRAG_LIN * sideslip +
++                                HULL_LAT_DRAG_QUAD * sideslip * fabsf(sideslip);
++
++    accel_body = Vector3f((throttle_force + force_fwd) - hull_drag, -hull_drag_lat, 0);
+     accel_body /= mass;
+ 
+     // add in accel due to direction change
+@@ -299,6 +316,16 @@ void Sailboat::update(const struct sitl_input &input)
+     temp_dcm.from_euler(0.0f, 0.0f, y);
+     Vector3f accel_earth = temp_dcm * accel_body;
+ 
++    // windage: a boat without a sail (the motorboat) is pushed by the air
++    // moving over its hull. Only while armed, like the tide below, so a boat
++    // waiting to arm stays where it started.
++    if (is_zero(sail_area) && hal.util->get_soft_armed()) {
++        const Vector2f air(wind_ef.x - velocity_ef.x, wind_ef.y - velocity_ef.y);
++        const Vector2f windage = air * (HULL_WINDAGE * air.length() / mass);
++        accel_earth.x += windage.x;
++        accel_earth.y += windage.y;
++    }
++
+     // we are on the ground, so our vertical accel is zero
+     accel_earth.z = 0 + wave_heave;
+ 

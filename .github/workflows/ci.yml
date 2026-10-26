@@ -156,6 +156,17 @@ jobs:
           trap 'docker logs torpedo 2>&1 | tail -30; docker rm -f torpedo >/dev/null' EXIT
           timeout 180 docker exec torpedo python3 /tools/smoke.py
 
+      # The motorboat holds a point without sliding off it: patches/ adds lateral
+      # hull drag, which the stock model lacks (murphy360/Proteus#864, #2252).
+      - name: Smoke test (a motorboat on station damps its sideslip)
+        if: matrix.image == 'rover'
+        run: |
+          docker run -d --name hull -e MODEL=motorboat -e SPEEDUP=20 -e ALT=0 \
+            -v "$PWD/tests:/tests:ro" sitl:test
+          trap 'docker logs hull 2>&1 | tail -50; docker rm -f hull >/dev/null' EXIT
+          timeout 600 docker exec hull python3 /tests/hull_sideslip.py --minutes 15
+          trap 'docker rm -f hull >/dev/null' EXIT
+
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
