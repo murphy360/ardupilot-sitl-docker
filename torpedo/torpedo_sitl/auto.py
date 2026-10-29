@@ -83,6 +83,15 @@ class AutoFlight:
         """An item's place in the flat frame."""
         return self.v.frame.to_ne(item.x / 1e7, item.y / 1e7)
 
+    def reframe(self, move) -> None:
+        """The vehicle moved its flat frame: the points kept go through ``move``."""
+        for entry in self.entries:
+            entry.point = move(entry.point)
+        if self.last_point is not None:
+            self.last_point = move(self.last_point)
+        if self.loiter is not None:
+            self.loiter["centre"] = move(self.loiter["centre"])
+
     def start(self) -> bool:
         """Begin AUTO; False when there is nothing to fly."""
         mission = self.v.mission

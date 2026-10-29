@@ -56,6 +56,12 @@ class World:
         self.baro_lost = False
         self.events: list[tuple[int, str]] = []  # STATUSTEXT: (severity, text)
 
+    def reframe(self, move, frame: Frame) -> None:
+        """The vehicle moved its flat frame to ``frame``: the estimate goes through
+        ``move`` (old north/east to new). Offsets are differences and stay."""
+        self.north, self.east = move((self.north, self.east))
+        self.frame = frame
+
     # -- the parameters -----------------------------------------------------------
 
     def _p(self, name: str, default: float = 0.0) -> float:
