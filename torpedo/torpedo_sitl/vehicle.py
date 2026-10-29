@@ -24,6 +24,11 @@ ArduSub says) until the position estimate is valid: ``ESTIMATE_DELAY_S`` of vehi
 time after boot (a GPS fix at boot). The estimate is the world's (``world.py``): the
 truth, unless the simulated GPS or DVL puts an error on it. The vehicle steers by the
 estimate; the truth is the simulator's alone (``SIM_STATE``).
+
+Positions are kept in a flat frame of north and east metres (``geo.py``). Once the hull
+is ``REBASE_M`` from the frame's origin, the origin moves to the hull and every
+position kept is moved with it, unchanged in latitude and longitude. A route may then
+be of any length and may cross 180 degrees. Home stays where the vehicle booted.
 """
 
 from __future__ import annotations
@@ -60,6 +65,7 @@ ESTIMATE_DELAY_S = 5.0  # a GPS fix at boot: the position estimate is valid this
 MANUAL_TIMEOUT_S = 1.0  # no MANUAL_CONTROL for this long: thrust 0, fins neutral
 VELOCITY_TIMEOUT_S = 3.0  # no new velocity target for this long: circle where it is
 SEABED_M = 50.0  # the SITL's flat floor, for terrain-frame targets
+REBASE_M = 10_000.0  # the frame's origin moves to the hull once it is this far away
 
 FRAME_GLOBAL_INT = 5
 FRAME_RELATIVE_ALT_INT = 6
@@ -90,12 +96,13 @@ class Vehicle:
         self.unix_boot = unix_boot  # wall (UNIX) time at boot, s
         p = params.get
         self.frame = Frame(p("SIM_OPOS_LAT"), p("SIM_OPOS_LNG"))
+        self.home_ll = (self.frame.lat, self.frame.lon)  # where it booted, degrees
         self.home_alt = p("SIM_OPOS_ALT")
         self.hull = Hull(model, heading=math.radians(p("SIM_OPOS_HDG")))
         self.world = World(params, self.frame)
         home = Item(
-            0, NAV_WAYPOINT, FRAME_GLOBAL, int(self.frame.lat * 1e7),
-            int(self.frame.lon * 1e7), self.home_alt,
+            0, NAV_WAYPOINT, FRAME_GLOBAL, int(self.home_ll[0] * 1e7),
+            int(self.home_ll[1] * 1e7), self.home_alt,
         )  # fmt: skip
         self.mission = Mission(home)
         self.auto = AutoFlight(self)
@@ -149,7 +156,7 @@ class Vehicle:
 
     @property
     def truth(self) -> tuple[float, float]:
-        """(north, east) metres from home: where the hull really is."""
+        """(north, east) metres in the flat frame: where the hull really is."""
         return (self.hull.north, self.hull.east)
 
     @property
@@ -159,7 +166,7 @@ class Vehicle:
 
     @property
     def position(self) -> tuple[float, float]:
-        """(north, east) metres from home: the estimate."""
+        """(north, east) metres in the flat frame: the estimate."""
         return self.world.estimate
 
     @property
@@ -341,6 +348,32 @@ class Vehicle:
         self._fence()
         if self.mode == SURFACE and h.depth < SURFACED_M:
             self.set_mode(ALT_HOLD, "surfaced")  # at the surface ArduSub holds
+        if math.hypot(*self.truth) > REBASE_M:
+            self._rebase()
+
+    def _rebase(self) -> None:
+        """Move the frame's origin to the hull. Every position kept moves with it,
+        unchanged in latitude and longitude; headings, speeds and offsets stay."""
+        old, new = self.frame, Frame(*self.truth_latlon)
+
+        def move(p: tuple[float, float]) -> tuple[float, float]:
+            return new.to_ne(*old.to_ll(*p))
+
+        self.hull.north, self.hull.east = 0.0, 0.0
+        self.world.reframe(move, new)
+        self.pilot.guidance.reframe(move)
+        self.auto.reframe(move)
+        if self.target is not None and self.target.kind == "point":
+            t = self.target
+            t.north, t.east = move((t.north, t.east))
+        self._hold_centre = move(self._hold_centre)
+        self.frame = new
+
+    def home_distance(self) -> float:
+        """How far the estimate is from home, m."""
+        n, e = self.position
+        hn, he = self.frame.to_ne(*self.home_ll)
+        return math.hypot(n - hn, e - he)
 
     def _depth_sensor(self) -> None:
         """A lost depth sensor: ArduSub holds no depth without it and goes to MANUAL."""
@@ -352,10 +385,11 @@ class Vehicle:
         FENCE_STATUS; ArduSub only logs it."""
         on = self.params.get("FENCE_ENABLE") >= 0.5
         kind, types = 0, int(self.params.get("FENCE_TYPE"))
-        n, e = self.position
         if on and types & 8 and self.depth > -self.params.get("FENCE_ALT_MIN"):
             kind = 1  # FENCE_BREACH_MINALT
-        elif on and types & 2 and math.hypot(n, e) > self.params.get("FENCE_RADIUS"):
+        elif (
+            on and types & 2 and self.home_distance() > self.params.get("FENCE_RADIUS")
+        ):
             kind = 3  # FENCE_BREACH_BOUNDARY
         breached, _, count, at = self.fence
         if kind and not breached:

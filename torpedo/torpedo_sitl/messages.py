@@ -158,8 +158,8 @@ def battery_status(v: Vehicle, mav) -> None:
 def home_position(v: Vehicle, mav) -> None:
     """HOME_POSITION: where it started."""
     mav.home_position_send(
-        int(v.frame.lat * DEG7),
-        int(v.frame.lon * DEG7),
+        int(v.home_ll[0] * DEG7),
+        int(v.home_ll[1] * DEG7),
         int(v.home_alt * 1000),
         0.0,
         0.0,

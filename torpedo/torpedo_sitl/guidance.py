@@ -122,6 +122,15 @@ class Guidance:
         self.mode = "circle"
         self.bias = 0.0
 
+    def reframe(self, move) -> None:
+        """The vehicle moved its flat frame: every point kept goes through ``move``
+        (old north/east to new). Radii, bearings and distances along a line stay."""
+        self.points = [move(p) for p in self.points]
+        self.centre = move(self.centre)
+        if self.arc is not None:
+            centre, radius, sign, out = self.arc
+            self.arc = move(centre), radius, sign, out
+
     def pop_reached(self) -> list[int]:
         """The route points reached since the last call."""
         out, self.reached = self.reached, []

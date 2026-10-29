@@ -149,6 +149,8 @@ A torpedo cannot hover or move sideways. It holds speed, heading and depth on it
 
 A hull comes as a model file mounted at run time. The repository holds none of a real vehicle's: its tests fly two generic hulls, `torpedo-test-small` and `torpedo-test-large`, written by `torpedo/tests/models/make_fixtures.py`. A hull is known only by its id (`torpedo-100`, `torpedo-300`, and so on).
 
+**Routes of any length, across 180 degrees.** The front seat flies in a flat frame of north and east metres about an origin (`torpedo_sitl/geo.py`). The frame is exact over a few kilometres, so once the hull is `REBASE_M` (10 km, `torpedo_sitl/vehicle.py`) from the origin, the origin moves to the hull. Every position the vehicle keeps (the truth, the estimate, the route, a GUIDED target, a hold or loiter centre) moves with it and keeps its latitude and longitude. Home stays where the vehicle booted, and the fence measures from it. Longitudes are wrapped into (-180, 180], so a frame near the date line takes the short way across it and every longitude in the telemetry is valid. A route may run thousands of kilometres and cross 180 degrees (murphy360/Proteus#2647).
+
 ### The image
 
 `ghcr.io/murphy360/ardupilot-sitl-docker-torpedo` (`linux/amd64`, `linux/arm64`; tags `latest`, the short commit sha and `0.1.<run>`) is built from [torpedo/Dockerfile](torpedo/Dockerfile) on `python:3.12-slim`. It follows no ArduPilot release. It carries `torpedo-sitl` (the entrypoint) and `torpedo-check`.
