@@ -25,7 +25,8 @@ ENV INSTANCE=0 \
     BATT_CAPACITY=10000 \
     TORPEDO_MODEL=""
 
-# SERIAL0 (Proteus), SERIAL1 (QGroundControl), SERIAL2 (the referee, the world)
-EXPOSE 5760 5762 5763
+# SERIAL0 (Proteus), SERIAL1 (QGroundControl), SERIAL2 (the referee, the world),
+# SERIAL6 (the acoustic ocean's truth; served only when SERIAL6_PROTOCOL is 2)
+EXPOSE 5760 5762 5763 5766
 
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/entrypoint.sh"]
