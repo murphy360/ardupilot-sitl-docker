@@ -120,6 +120,10 @@ def documented(
         "RNGFND1_MIN_CM": 20.0,
         "RNGFND1_MAX": 7.0,
         "RNGFND1_MIN": 0.2,
+        "FS_TERRAIN_ENAB": 0.0,  # disarm
+        "WP_RFND_USE": 1.0,
+        "WP_SPD_UP": 2.5,
+        "WP_SPD_DN": 1.5,
         "EK3_SRC1_VELXY": 3.0,
         "WPNAV_SPEED_UP": 50.0,
         "PILOT_SPEED_UP": 500.0,

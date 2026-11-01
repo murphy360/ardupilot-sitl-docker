@@ -22,7 +22,12 @@ that assumes a hovering vehicle in front of them:
 * depth: the depth error gives a pitch demand (limited to the hull's steepest pitch),
   with a rate term and a small integral that trims the net buoyancy out. The elevators
   hold the pitch in the same way as the rudder holds the heading, a hull turning in
-  pitch at about the same ``v / R``. A pitch demand can also be given directly.
+  pitch at about the same ``v / R``. A pitch demand can also be given directly. A
+  depth asked that moves (the bed a terrain-frame leg follows) gives its rate too: the
+  pitch of that climb or dive (``path_pitch``) is fed forward, the rate term works on
+  the rate short of it, and the elevators are given the rate that pitch changes at,
+  as the rudder is given a circle's turn rate. A slope is then followed without a
+  standing error, as quickly as the hull pitches.
 
 Tuned values (the acceptance lines of ``check`` hold with them on both test hulls):
 ``HEADING_SPAN`` 1.0 rad, ``PITCH_SPAN`` 0.4 rad, ``RATE_K`` 1.0, ``RATE_I`` 0.5 per s,
@@ -31,6 +36,7 @@ Tuned values (the acceptance lines of ``check`` hold with them on both test hull
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from .model import Model
@@ -66,6 +72,7 @@ class Command:
     depth: float
     turn_rate: float = 0.0  # rad/s: the yaw rate the course itself turns at (a circle)
     over_ground: bool = True  # the course is over the ground; False: it is a heading
+    depth_rate: float = 0.0  # m/s (down): how fast the depth asked moves, fed forward
 
 
 @dataclass(frozen=True)
@@ -86,12 +93,14 @@ class Control:
         self.integral = 0.0
         self.trim = 0.0
         self.rate_i = 0.0  # the rudder's integral of the rate shortfall
+        self.path = 0.0  # rad: the path's pitch fed forward at the last step
 
     def reset(self) -> None:
         """Forget the integrals."""
         self.integral = 0.0
         self.trim = 0.0
         self.rate_i = 0.0
+        self.path = 0.0
 
     # -- the loops ------------------------------------------------------------------
 
@@ -155,21 +164,38 @@ class Control:
         return self.model.fin.max_rad * clamp(frac + self.rate_i, -1.0, 1.0)
 
     def pitch_demand(
-        self, depth_cmd: float, depth: float, rate: float, dt: float = 0.0
+        self,
+        depth_cmd: float,
+        depth: float,
+        rate: float,
+        dt: float = 0.0,
+        cmd_rate: float = 0.0,
+        speed: float = 0.0,
     ) -> float:
         """The pitch that brings the hull to ``depth_cmd`` m: nose down to go deeper.
         A small integral trims the net buoyancy out (frozen while the demand is at its
-        limit)."""
-        lim = self.model.max_pitch_rad
+        limit). A depth asked that moves at ``cmd_rate`` m/s feeds the pitch of that
+        path forward, at ``speed``."""
+        m = self.model
+        lim = m.max_pitch_rad
         err = depth_cmd - depth
-        p = -DEPTH_P * err + DEPTH_D * rate - self.trim
+        p = -DEPTH_P * err + DEPTH_D * (rate - cmd_rate) - self.trim
+        p += path_pitch(m, cmd_rate, speed)
         if abs(p) < lim and abs(err) < TRIM_BAND:
             self.trim = clamp(self.trim + DEPTH_I * err * dt, -TRIM_MAX, TRIM_MAX)
         return clamp(p, -lim, lim)
 
-    def elevator(self, pitch_cmd: float, pitch: float, pitch_rate: float, speed: float):
-        """The elevator angle that holds ``pitch_cmd``."""
-        frac, _, _ = self._fin(pitch_cmd - pitch, PITCH_SPAN, pitch_rate, speed)
+    def elevator(
+        self,
+        pitch_cmd: float,
+        pitch: float,
+        pitch_rate: float,
+        speed: float,
+        ahead: float = 0.0,
+    ):
+        """The elevator angle that holds ``pitch_cmd``, a pitch that itself changes
+        at ``ahead`` rad/s."""
+        frac, _, _ = self._fin(pitch_cmd - pitch, PITCH_SPAN, pitch_rate, speed, ahead)
         return self.model.fin.max_rad * clamp(frac, -1.0, 1.0)
 
     # -- all three --------------------------------------------------------------------
@@ -183,9 +209,23 @@ class Control:
         busy = abs(hull.r) > TURNING or err > TURNING or abs(rate) > DEEP_RATE
         thrust = self.thrust(dt, cmd.speed, speed, busy)
         rudder = self.rudder(heading, hull.heading, hull.r, speed, cmd.turn_rate, dt)
-        pitch_cmd = self.pitch_demand(cmd.depth, hull.depth, rate, dt)
-        elev = self.elevator(pitch_cmd, hull.pitch, hull.q, speed)
+        pitch_cmd = self.pitch_demand(
+            cmd.depth, hull.depth, rate, dt, cmd.depth_rate, speed
+        )
+        path = path_pitch(self.model, cmd.depth_rate, speed)
+        ahead = (path - self.path) / dt if dt > 0.0 else 0.0
+        self.path = path
+        elev = self.elevator(pitch_cmd, hull.pitch, hull.q, speed, ahead)
         return Actuators(thrust, rudder, elev)
+
+
+def path_pitch(model: Model, depth_rate: float, speed: float) -> float:
+    """The pitch of a path that changes depth at ``depth_rate`` m/s (down) at
+    ``speed``, rad, nose up to climb; 0 for a level one."""
+    if not depth_rate:
+        return 0.0
+    along = max(abs(speed), model.steer_speed_mps)
+    return -math.asin(clamp(depth_rate / along, -1.0, 1.0))
 
 
 def crab(hull: Hull) -> float:

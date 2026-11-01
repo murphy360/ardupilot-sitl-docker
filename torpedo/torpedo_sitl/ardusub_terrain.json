@@ -1,0 +1,132 @@
+{
+ "skipchk_default": 16776767,
+ "mission_ack": 0,
+ "arm_refused": {
+  "ack": 4,
+  "texts": [
+   [
+    2,
+    "Arm: terrain disabled"
+   ]
+  ]
+ },
+ "prearm": [
+  [
+   2,
+   "PreArm: terrain disabled"
+  ]
+ ],
+ "arm_default": {
+  "ack": 0,
+  "texts": [
+   [
+    6,
+    "Arming motors"
+   ]
+  ]
+ },
+ "failsafe": {
+  "0": {
+   "texts": [
+    [
+     2,
+     "Failsafe terrain triggered"
+    ],
+    [
+     4,
+     "Attempting auto failsafe recovery"
+    ],
+    [
+     2,
+     "Terrain failsafe recovery timeout!"
+    ],
+    [
+     6,
+     "Disarming motors"
+    ]
+   ],
+   "custom_mode": 3,
+   "armed": false,
+   "system_status": 5,
+   "depth_at_cut": 6.07,
+   "depth_min": -0.19,
+   "depth_max": 6.06
+  },
+  "1": {
+   "texts": [
+    [
+     2,
+     "Failsafe terrain triggered"
+    ],
+    [
+     4,
+     "Attempting auto failsafe recovery"
+    ],
+    [
+     2,
+     "Terrain failsafe recovery timeout!"
+    ]
+   ],
+   "custom_mode": 16,
+   "armed": true,
+   "system_status": 4,
+   "depth_at_cut": 6.55,
+   "depth_min": 0.01,
+   "depth_max": 6.55
+  },
+  "2": {
+   "texts": [
+    [
+     2,
+     "Failsafe terrain triggered"
+    ],
+    [
+     4,
+     "Attempting auto failsafe recovery"
+    ],
+    [
+     2,
+     "Terrain failsafe recovery timeout!"
+    ]
+   ],
+   "custom_mode": 2,
+   "armed": true,
+   "system_status": 4,
+   "depth_at_cut": 6.57,
+   "depth_min": 0.02,
+   "depth_max": 6.57
+  }
+ },
+ "recovered": {
+  "texts": [
+   [
+    2,
+    "Failsafe terrain triggered"
+   ],
+   [
+    4,
+    "Attempting auto failsafe recovery"
+   ],
+   [
+    6,
+    "Terrain failsafe recovery successful!"
+   ],
+   [
+    6,
+    "Mission: 2 WP"
+   ]
+  ],
+  "custom_mode": 3
+ },
+ "guided": {
+  "with_velocity": {
+   "moved_north_m": 0.0,
+   "depth": 0.83
+  },
+  "position": {
+   "moved_north_m": 11.0,
+   "depth": 0.99
+  }
+ },
+ "image": "ghcr.io/murphy360/ardupilot-sitl-docker-sub:latest"
+}

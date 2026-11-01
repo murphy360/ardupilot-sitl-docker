@@ -8,6 +8,12 @@ and ``SYS_STATUS`` sensor bits in three states (a GPS fix; the GPS off with a DV
 velocity; neither). The front seat uses them, so its words and numbers are ArduSub's own
 and a client that reads them (a failsafe's name, an EKF's health) is not told
 something ArduSub would not say.
+
+``ardusub_terrain.json`` is written by ``tools/capture_terrain.py``: a terrain-frame
+mission flown on the rangefinder, the arming refusal it gets with the parameter checks
+on, the terrain failsafe for each ``FS_TERRAIN_ENAB`` action and a recovery, and the
+terrain-frame GUIDED targets (``terrain.py`` says those words; the contract test holds
+them to the capture).
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 
 PATH = Path(__file__).with_name("ardusub_surface.json")
+TERRAIN_PATH = Path(__file__).with_name("ardusub_terrain.json")
 LASER_POSITION = 0x100  # SYS_STATUS: the downward rangefinder
 ABSOLUTE_PRESSURE = 0x8  # SYS_STATUS: ArduSub's external depth sensor
 
@@ -26,6 +33,12 @@ ABSOLUTE_PRESSURE = 0x8  # SYS_STATUS: ArduSub's external depth sensor
 def data() -> dict:
     """The captured document."""
     return json.loads(PATH.read_text())
+
+
+@lru_cache(maxsize=1)
+def terrain() -> dict:
+    """The terrain-frame capture."""
+    return json.loads(TERRAIN_PATH.read_text())
 
 
 def params() -> dict[str, float]:

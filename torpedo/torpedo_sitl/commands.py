@@ -50,7 +50,8 @@ def _params_of(msg) -> list[float]:
 def _arm(server, conn, p) -> int:
     ok, why = server.vehicle.arm(p[0] >= 0.5, force=p[1] == FORCE_ARM)
     if not ok:
-        statustext(conn.mav, 4, why)
+        if why:  # the vehicle says its own refusals on every link
+            statustext(conn.mav, 4, why)
         return FAILED
     return ACCEPTED
 

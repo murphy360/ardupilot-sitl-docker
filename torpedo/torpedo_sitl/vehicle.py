@@ -13,7 +13,9 @@ each does on a torpedo is written beside it:
   it entered at the least loiter radius and the steering speed: a torpedo cannot hover;
 * GUIDED (4): a position target (point guidance, then the circle), or a velocity target
   (course and speed at the depth it holds; three seconds without a new one and it
-  circles where it is). With no target it circles where it entered;
+  circles where it is). With no target it circles where it entered. A terrain-frame
+  position is a height above the bed the rangefinder senses (``terrain.py``); one sent
+  with a velocity is dropped, as ArduSub drops it;
 * SURFACE (9): the steering speed on its heading, pitched up to rise. At the surface it
   switches itself to ALT_HOLD with the motor off, as ArduSub does.
 
@@ -34,9 +36,8 @@ be of any length and may cross 180 degrees. Home stays where the vehicle booted.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 
-from . import captured
+from . import captured, targets
 from .auto import AutoFlight
 from .autopilot import Autopilot
 from .battery import Battery
@@ -47,6 +48,9 @@ from .mission import FRAME_GLOBAL, NAV_WAYPOINT, Item, Mission
 from .model import Model
 from .params import ParamStore
 from .physics import Hull, clamp
+from .rangefinder import Rangefinder
+from .targets import FRAME_RELATIVE_ALT_INT, Target  # noqa: F401 (callers use it)
+from .terrain import CRITICAL, Terrain
 from .world import World
 
 STABILIZE, ALT_HOLD, AUTO, GUIDED, SURFACE, MANUAL = 0, 2, 3, 4, 9, 19
@@ -64,27 +68,7 @@ SURFACED_M = 0.5  # shallower than this the sub is at the surface
 ESTIMATE_DELAY_S = 5.0  # a GPS fix at boot: the position estimate is valid this late
 MANUAL_TIMEOUT_S = 1.0  # no MANUAL_CONTROL for this long: thrust 0, fins neutral
 VELOCITY_TIMEOUT_S = 3.0  # no new velocity target for this long: circle where it is
-SEABED_M = 50.0  # the SITL's flat floor, for terrain-frame targets
 REBASE_M = 10_000.0  # the frame's origin moves to the hull once it is this far away
-
-FRAME_GLOBAL_INT = 5
-FRAME_RELATIVE_ALT_INT = 6
-FRAME_TERRAIN_ALT_INT = 11
-POSITION_IGNORED = 0b111
-VELOCITY_IGNORED = 0b111000
-
-
-@dataclass
-class Target:
-    """A GUIDED target: a point at a depth, or a course and speed."""
-
-    kind: str  # "point" or "velocity"
-    depth: float
-    north: float = 0.0
-    east: float = 0.0
-    course: float = 0.0
-    speed: float = 0.0
-    at: float = 0.0  # vehicle time it arrived
 
 
 class Vehicle:
@@ -107,6 +91,8 @@ class Vehicle:
         self.mission = Mission(home)
         self.auto = AutoFlight(self)
         self.failsafe = Failsafes(self)
+        self.rangefinder = Rangefinder(self)
+        self.terrain = Terrain(self)
         self.reached: list[int] = []  # mission items reached: MISSION_ITEM_REACHED
         self.mode_reason = "gcs"
         self.wp_radius_override: float | None = None
@@ -225,7 +211,12 @@ class Vehicle:
 
     def arm(self, arm: bool, force: bool = False) -> tuple[bool, str]:
         """Arm or disarm. ArduSub refuses nothing at the surface that a torpedo can
-        see; ``force`` is kept for the command's sake."""
+        see but a terrain mission with its parameter checks on (``terrain.py``);
+        ``force`` skips that, as ArduSub's forced arm does."""
+        why = self.terrain.arming_failure() if arm and not force else None
+        if why and not self.armed:
+            self.announce((CRITICAL, f"Arm: {why}"))
+            return False, ""
         if arm and not self.armed:
             self.announce(captured.arm_text())
             self.failsafe.armed()
@@ -284,49 +275,11 @@ class Vehicle:
         alt: float,
         vel: tuple[float, float],
     ) -> tuple[bool, str]:
-        """``SET_POSITION_TARGET_GLOBAL_INT`` (degrees, metres, m/s north and east).
-        Taken in GUIDED only. A position holds until another comes; a velocity for
-        ``VELOCITY_TIMEOUT_S``."""
+        """``SET_POSITION_TARGET_GLOBAL_INT`` (degrees, metres, m/s north and east),
+        taken in GUIDED only (``targets.py``): (True, "") or (False, why)."""
         if self.mode != GUIDED:
             return False, "not in GUIDED"
-        m = self.model
-        if (mask & POSITION_IGNORED) != POSITION_IGNORED:
-            depth = self._depth_of(frame, alt)
-            if depth is None:
-                return False, f"frame {frame} is not supported"
-            depth = clamp(depth, 0.0, m.depth_limit_m)
-            n, e = self.frame.to_ne(lat, lon)
-            old = self.target
-            if (
-                old is not None
-                and old.kind == "point"
-                and math.hypot(old.north - n, old.east - e) < 0.05
-                and abs(old.depth - depth) < 0.05
-            ):
-                return True, ""  # the same point again: a held target is not restarted
-            self.target = Target("point", depth, n, e, at=self.t)
-            self.pilot.guidance.goto((n, e))
-            return True, ""
-        if (mask & VELOCITY_IGNORED) != VELOCITY_IGNORED:
-            vn, ve = vel
-            depth = self.target.depth if self.target else self.hull.depth
-            speed = math.hypot(vn, ve)
-            course = math.atan2(ve, vn) if speed > 1e-3 else self.hull.heading
-            speed = clamp(speed, m.steer_speed_mps, m.max_speed_mps)
-            self.target = Target(
-                "velocity", depth, course=course, speed=speed, at=self.t
-            )
-            return True, ""
-        return False, "no position or velocity in the target"
-
-    def _depth_of(self, frame: int, alt: float) -> float | None:
-        if frame == FRAME_GLOBAL_INT:
-            return self.home_alt - alt
-        if frame == FRAME_RELATIVE_ALT_INT:
-            return -alt
-        if frame == FRAME_TERRAIN_ALT_INT:
-            return SEABED_M - alt
-        return None
+        return targets.position_target(self, frame, mask, lat, lon, alt, vel)
 
     # -- the step ---------------------------------------------------------------------
 
@@ -343,8 +296,10 @@ class Vehicle:
         w.step(dt, self.truth, h.velocity_ned()[:2], h.depth)
         self.texts += w.events
         w.events = []
+        self.rangefinder.step(dt)
         self._depth_sensor()
         self.failsafe.step(dt)
+        self.terrain.step(dt)
         self._fence()
         if self.mode == SURFACE and h.depth < SURFACED_M:
             self.set_mode(ALT_HOLD, "surfaced")  # at the surface ArduSub holds
@@ -444,11 +399,13 @@ class Vehicle:
         g.circle(self._hold_centre, g.min_radius(), True)
         self._held = True
 
-    def _fly_guidance(self, dt: float, speed: float, depth: float) -> Actuators:
+    def _fly_guidance(
+        self, dt: float, speed: float, depth: float, depth_rate: float = 0.0
+    ) -> Actuators:
         g, h = self.pilot.guidance, self.hull
         course = g.course(self.position, dt, h.velocity_ned()[:2])
         rate = g.curvature * h.u if g.rate is None else g.rate
-        cmd = Command(course, speed, depth, rate)
+        cmd = Command(course, speed, depth, rate, depth_rate=depth_rate)
         return self.pilot.control.update(dt, h, cmd)
 
     def _hold(self, dt: float) -> Actuators:
@@ -467,6 +424,11 @@ class Vehicle:
                 self.target, self._held = None, False
                 return self._hold(dt)
             return self._course(dt, tgt.course, tgt.speed, tgt.depth)
+        if tgt is not None and tgt.height is not None:
+            tgt.depth = self.terrain.depth_for(tgt.height, tgt.depth)
+            rate = self.terrain.depth_rate
+            return self._fly_guidance(dt, self.speed, tgt.depth, rate)
         if tgt is not None:
+            self.terrain.level()
             return self._fly_guidance(dt, self.speed, tgt.depth)
         return self._hold(dt)
