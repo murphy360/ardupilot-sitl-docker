@@ -138,13 +138,14 @@ A torpedo cannot hover or move sideways. It holds speed, heading and depth on it
 | `torpedo_sitl/guidance.py` | Lines (line of sight), corners, points and circles |
 | `torpedo_sitl/autopilot.py` | The loops and the guidance together |
 | `torpedo_sitl/check.py` | `torpedo-check <model.json>`: flies the acceptance scenarios on any model file |
-| `torpedo_sitl/vehicle.py` | The vehicle: modes, arming, targets, battery, what it knows of itself |
+| `torpedo_sitl/vehicle.py`, `targets.py` | The vehicle: modes, arming, battery, what it knows of itself; GUIDED's targets |
 | `torpedo_sitl/server.py`, `link.py`, `commands.py`, `messages.py` | The MAVLink ports (three, and SERIAL6 when it is on), the clock, each connection's stream rates, the commands and the telemetry |
 | `torpedo_sitl/params.py` | The parameter store and its defaults |
 | `torpedo_sitl/mission.py`, `auto.py` | The mission and its protocol; AUTO flying it |
+| `torpedo_sitl/rangefinder.py`, `terrain.py` | The downward rangefinder as ArduSub reads it; the terrain frame flown on it, its failsafe and its arming check |
 | `torpedo_sitl/failsafe.py` | The failsafes and the Proteus-dead script |
 | `torpedo_sitl/world.py` | The simulated world: current, GPS, DVL, rangefinder, depth sensor |
-| `torpedo_sitl/captured.py`, `ardusub_surface.json` | What the real ArduSub says, captured |
+| `torpedo_sitl/captured.py`, `ardusub_surface.json`, `ardusub_terrain.json` | What the real ArduSub says, captured |
 | `torpedo_sitl/cli.py` | `torpedo-sitl`: starts the front seat from the SITL images' environment |
 
 A hull comes as a model file mounted at run time. The repository holds none of a real vehicle's: its tests fly two generic hulls, `torpedo-test-small` and `torpedo-test-large`, written by `torpedo/tests/models/make_fixtures.py`. A hull is known only by its id (`torpedo-100`, `torpedo-300`, and so on).
@@ -198,7 +199,7 @@ SERIAL0, SERIAL1 and SERIAL2 are TCP servers, MAVLink 2, system id `SYSID`, comp
 | SURFACE | 9 | The steering speed on its heading, pitched up to rise. At the surface it switches itself to ALT_HOLD with the motor off, as ArduSub does |
 | AUTO | 3 | The mission (below). Refused with no mission |
 
-GUIDED and AUTO are refused until the position estimate is valid (5 s of vehicle time after boot), in ArduSub's words (`Mode change failed: Guided requires position`). Arming (`MAV_CMD_COMPONENT_ARM_DISARM`) is not refused, as ArduSub's is not. *Targets* (`SET_POSITION_TARGET_GLOBAL_INT`) are taken in GUIDED in the frames GLOBAL_INT (depth is the home altitude less alt), GLOBAL_RELATIVE_ALT_INT (depth is -alt) and GLOBAL_TERRAIN_ALT_INT (height above a flat 50 m seabed). A position with a velocity of zero, a position alone and a velocity alone are all understood. A held point is circled for as long as it stands: sending it again does not restart it. `MAV_CMD_DO_CHANGE_SPEED` sets the speed, between the hull's steering speed and its top speed.
+GUIDED and AUTO are refused until the position estimate is valid (5 s of vehicle time after boot), in ArduSub's words (`Mode change failed: Guided requires position`). Arming (`MAV_CMD_COMPONENT_ARM_DISARM`) is not refused, as ArduSub's is not, but for a terrain mission with the parameter checks on (see the terrain frame, below). *Targets* (`SET_POSITION_TARGET_GLOBAL_INT`) are taken in GUIDED in the frames GLOBAL_INT (depth is the home altitude less alt), GLOBAL_RELATIVE_ALT_INT (depth is -alt) and GLOBAL_TERRAIN_ALT_INT (alt is a height above the bed the rangefinder senses). A position with a velocity of zero, a position alone and a velocity alone are all understood, except that a terrain-frame position with a velocity is dropped, as ArduSub drops it. A held point is circled for as long as it stands: sending it again does not restart it. `MAV_CMD_DO_CHANGE_SPEED` sets the speed, between the hull's steering speed and its top speed.
 
 *Commands*: `COMPONENT_ARM_DISARM`, `DO_SET_MODE`, `DO_CHANGE_SPEED`, `REQUEST_MESSAGE`, `SET_MESSAGE_INTERVAL` and `PREFLIGHT_REBOOT_SHUTDOWN`; each is answered with a `COMMAND_ACK`. `DO_SET_MISSION_CURRENT` makes an item current (in AUTO the vehicle goes to it). `DO_ORBIT`, `NAV_TAKEOFF` and the rest are UNSUPPORTED, as ArduSub answers. A reboot (refused while armed) closes every link and starts again at `SIM_OPOS_*` with the saved parameters, which is how a client moves the simulator (see the section above).
 
@@ -207,6 +208,8 @@ GUIDED and AUTO are refused until the position estimate is valid (5 s of vehicle
 *Parameters*: `PARAM_REQUEST_READ`, `PARAM_REQUEST_LIST` and `PARAM_SET` work on the names a submarine's client reads (identity, arrival radius, failsafes, fence, battery, rangefinder, EKF sources), `SIM_OPOS_LAT/LNG/ALT/HDG`, and the front seat's own: `TPDO_MODEL` (read only: the number in the hull's id, 100 for `torpedo-100`), `TPDO_LOS_LA`, `TPDO_TURN_K` and `TPDO_LOIT_MIN`, the guidance tuning. `WP_RADIUS_M` starts at the hull's turning radius. A `PARAM_SET` is saved to `/tmp/torpedo-<INSTANCE>.parm` and kept over a reboot; the file is cleared when the container starts. A name in `SITL_PARAMS` or a parameter file that nobody knows is kept and answered.
 
 ### Captured from the real ArduSub
+
+`torpedo/torpedo_sitl/ardusub_terrain.json` is captured the same way by `torpedo/tools/capture_terrain.py` (one run of the image at 2x, frame vectored, which flies): a terrain-frame mission on the rangefinder, the arming refusal with the parameter checks on, the terrain failsafe for each `FS_TERRAIN_ENAB` action, a recovery and two terrain-frame GUIDED targets.
 
 `torpedo/torpedo_sitl/ardusub_surface.json` is what the real ArduSub says, captured once from its SITL image by `torpedo/tools/capture_ardusub.py` (`python3 torpedo/tools/capture_ardusub.py` on a host with Docker; it starts the image twice at 5x and removes it, and nothing is flown). It holds every parameter's name and default (the front seat starts with them, in ArduSub's order), the `STATUSTEXT` lines for arming, a refused mode, the GCS failsafe and its clearing, the battery failsafes and a lost depth sensor or GPS, and the `EKF_STATUS_REPORT` flags and `SYS_STATUS` sensor bits in three states: a GPS fix, the GPS off with a DVL's velocity, and neither. The front seat says those words and reports those flags, so a client that reads a failsafe's name or an EKF's health is told what ArduSub would tell it. `torpedo/tests/test_ardusub_contract.py` holds it to that.
 
@@ -218,7 +221,7 @@ AUTO starts at the current item (item 1 when the mission had ended) and flies th
 
 | Item | What it does |
 |------|--------------|
-| `NAV_WAYPOINT` | A point at the item's depth (`param2` is its acceptance radius). A run of waypoints is one route: the line from the last point (or from where AUTO began), the next line starting early at a corner |
+| `NAV_WAYPOINT` | A point at the item's depth (`param2` is its acceptance radius). In the terrain frame the item's altitude is a height above the bed, followed all along the line to it. A run of waypoints is one route: the line from the last point (or from where AUTO began), the next line starting early at a corner |
 | `DO_CHANGE_SPEED` | The speed, when the item before it is reached |
 | `NAV_LOITER_UNLIM` | The circle about the point at the least loiter radius, for good (the return route's end) |
 | `NAV_LOITER_TURNS` | `param1` turns of the circle, `param3` its radius in metres (negative: counter-clockwise). A radius under the least loiter radius is raised to it, with a `STATUSTEXT`. Joined on a tangent; reached after the turns |
@@ -233,6 +236,7 @@ At the end of the mission the vehicle circles the last point.
 * **Proteus dead**: `deploy/autopilot/ardusub/proteus_dead.lua` of the Proteus repository, in Python: the same states, timings and texts (`PDEAD: ...`). `PDEAD_ACTION` 1 waits `PDEAD_HOLD_S` s in the GCS failsafe's depth hold, then SURFACE (0: no limit); 2 goes to AUTO from the return route's `DO_LAND_START` (or item 1) and falls back to the timed wait when AUTO is refused. `SCR_ENABLE` reads 1.
 * **Battery**: `BATT_LOW_*` and `BATT_CRT_*` (volts below the limit for `BATT_LOW_TIMER` s, or the charge left below the mAh limit); `BATT_FS_LOW_ACT` / `BATT_FS_CRT_ACT`: 0 none, 1 warn, 2 disarm, 3 surface.
 * **Pilot input**: `FS_PILOT_INPUT` (1 warn, 2 disarm) after `FS_PILOT_TIMEOUT` s with no `MANUAL_CONTROL` in MANUAL or STABILIZE. ArduSub's SITL showed nothing for either action under the capture's conditions, so a warning shows nothing here either.
+* **Terrain**: in AUTO or GUIDED, more than 1 s with no healthy range on a terrain-frame leg. `FS_TERRAIN_ENAB`: 0 disarm (ArduSub's default), 1 hold (ALT_HOLD), 2 SURFACE, after ArduSub's recovery (see the terrain frame, below). The heartbeat says CRITICAL while it is on.
 * **Fence and leak**: parameters only. A fence breach (`FENCE_ENABLE`, the circle about home, the depth limit) is shown in `FENCE_STATUS`; ArduSub only logs it.
 
 ### The simulated world
@@ -245,10 +249,21 @@ A simulator sets `SIM_*` parameters (the container's start-up file or `SITL_PARA
 | `SIM_GPS1_ENABLE` (older: `SIM_GPS_DISABLE`) | The GPS fix. With the fix the estimate is the GPS |
 | `SIM_GPS1_GLTCH_X`, `SIM_GPS1_GLTCH_Y` | The fix's offset, in degrees of latitude and longitude |
 | `SIM_VICON_TMASK` (0 no lock; 2 or 8 lock), `SIM_VICON_VGLI_X/Y` (m/s north, east), `SIM_VICON_GLIT_X/Y` (m), `SIM_VICON_V_SD` (noise, m/s) | A DVL, fitted when `VISO_TYPE` is set and `EK3_SRC1_VELXY` is 6. With the GPS off and a lock, the estimate dead-reckons on the true velocity plus those errors. With neither it holds its last position, as EKF3 does. A fix snaps it back to the truth |
-| `SIM_SONAR_POS_Z` | The rangefinder reads `50 - SIM_SONAR_POS_Z - depth`, the SITL's flat 50 m floor |
+| `SIM_SONAR_POS_Z` | The rangefinder reads `50 - SIM_SONAR_POS_Z - depth`: the bed is at `50 - SIM_SONAR_POS_Z` m (the SITL's flat 50 m floor, raised). Changed as the hull goes, it makes a slope |
 | `SIM_BARO_DISABLE` | The depth sensor fails: the estimate's depth freezes, `SYS_STATUS` says unhealthy, `Depth sensor error!` and an armed vehicle in a depth mode goes to MANUAL, as ArduSub does |
 
 The vehicle steers by its estimate. `SIM_STATE` (and `GPS_RAW_INT` with its offset) carry the truth.
+
+### The terrain frame
+
+A terrain-frame altitude (`MAV_FRAME_GLOBAL_TERRAIN_ALT` / `_INT`, in a mission item or a GUIDED target) is a height above the bed that the downward rangefinder senses, as ArduSub 4.7 flies it on its rangefinder (`WP_RFND_USE` 1, its default):
+
+* **The bed** is ArduSub's terrain offset: the depth plus the range, low-passed at 0.25 Hz, taken while the rangefinder is healthy: fitted (`RNGFND1_TYPE`), within `RNGFND1_MIN` and `RNGFND1_MAX`, three good readings in a row (20 Hz). The depth asked is the bed less the item's height, between the surface and the hull's `depth_limit_m`, worked out at every step, so the hull follows the bed along each line, not only at its points.
+* **On a torpedo** the depth loop is given the bed's slope too (from the depth and each reading, so the hull's own climbs do not show in it): the pitch of that path is fed forward, and the elevators the rate it changes at. Measured over 3 m rises at the hulls' cruise speed (1.5 m/s), the true height stays within 1 m of the 4 m asked on 3 % (3 m over 100 m), 10 % and 20 % grades (3.45 to 4.3 m), but for the large test hull on 20 %, which dips to 2.97 m with its elevators at their stop (it pitches no faster at any speed it can fly). Stock ArduSub, a vectored ROV, measured 3.3 to 3.8 m.
+* **The failsafe**: in AUTO or GUIDED, more than `FS_TERRAIN_TIMEOUT_MS` (1 s) of failures (no healthy range on a terrain leg; 0.1 s of success clears them): `Failsafe terrain triggered` (CRITICAL), then, a rangefinder fitted, `Attempting auto failsafe recovery` (WARNING). A terrain leg that begins after one that was not, with nothing sensed, says `Terrain data (rangefinder) not available` and does the same at once. With no rangefinder the action follows at once.
+* **Recovery** (AUTO): the mission stops. Under `RNGFND1_MIN` it climbs at `WP_SPD_UP`; past `RNGFND1_MAX` ArduSub asks `WP_SPD_DN` as a climb rate, so it climbs then too and never goes deeper (the capture shows it); a good but not yet healthy reading holds the depth. A torpedo cannot hover, so it holds by circling where recovery began, at the steering speed. 1.5 s of healthy range: `Terrain failsafe recovery successful!` and the mission resumes at its current item. After `FS_TERRAIN_RECOVER_TIMEOUT_MS` (10 s): `Terrain failsafe recovery timeout!` and the `FS_TERRAIN_ENAB` action: 0 disarm (it stays in AUTO, CRITICAL), 1 hold (ArduSub asks POSHOLD; the torpedo's hold is ALT_HOLD, its circle at depth), 2 SURFACE, then ALT_HOLD at the top.
+* **Arming**: with a terrain-frame item in the stored mission and the parameter checks on (`ARMING_SKIPCHK` without bit 5), arming is refused as ArduSub refuses it: `Arm: terrain disabled` for the command (`COMMAND_ACK` FAILED) and `PreArm: terrain disabled` from the periodic check (every 30 s while disarmed), with `TERRAIN_ENABLE` 0. ArduSub has no rangefinder exception there. ArduSub's own `ARMING_SKIPCHK` skips the parameter checks, so by default it arms. A forced arm skips the check.
+* **GUIDED**: a terrain-frame position alone is flown at that height above the sensed bed; with a velocity it is dropped (ArduSub converts it through the origin, which a terrain altitude cannot be, and stops). One sent with nothing sensed, after a target that was not in the terrain frame, is dropped too.
 
 ### Developing
 

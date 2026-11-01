@@ -7,8 +7,9 @@ began (or at the last point reached). Each waypoint reached sends
 ``MISSION_ITEM_REACHED``.
 
 * ``NAV_WAYPOINT``: a point at the item's depth (its frame's: GLOBAL_RELATIVE_ALT is
-  ``-z``, GLOBAL is the home altitude less ``z``, TERRAIN_ALT a height above the 50 m
-  floor). ``param2`` is its acceptance radius when set;
+  ``-z``, GLOBAL is the home altitude less ``z``, TERRAIN_ALT ``z`` above the bed the
+  rangefinder senses, all along the line to it: ``terrain.py``). ``param2`` is its
+  acceptance radius when set;
 * ``DO_CHANGE_SPEED``: the speed, when the item before it is reached;
 * ``NAV_LOITER_UNLIM``: the circle about the point at the least loiter radius, for
   good (the return route's end);
@@ -18,6 +19,9 @@ began (or at the last point reached). Each waypoint reached sends
 * ``DO_LAND_START``: a marker, passed over. Any other item is skipped, with a
   ``STATUSTEXT``;
 * the end of the mission: the vehicle circles the last point.
+
+While the terrain failsafe recovers (``terrain.py``) the mission stops and recovery
+flies the vehicle; it resumes at the current item.
 """
 
 from __future__ import annotations
@@ -35,11 +39,10 @@ from .mission import (
     Item,
 )
 from .physics import wrap
+from .terrain import is_terrain
 
-SEABED_M = 50.0
 GLOBAL, GLOBAL_INT = 0, 5
 RELATIVE_ALT, RELATIVE_ALT_INT = 3, 6
-TERRAIN_ALT, TERRAIN_ALT_INT = 10, 11
 JOIN_RATIO = 1.5  # inside this many radii the hull has joined the circle
 INFO = 6
 
@@ -53,6 +56,7 @@ class Entry:
     depth: float
     radius: float
     after: list[int]  # the DO items that follow it, run when it is reached
+    height: float | None = None  # m above the bed: a terrain-frame point
 
 
 class AutoFlight:
@@ -65,19 +69,29 @@ class AutoFlight:
         self.last_depth = 0.0
         self.loiter: dict | None = None  # the loiter being flown
         self.depth = 0.0
+        self.height: float | None = None  # m above the bed, on a terrain leg
+        self.last_height: float | None = None
 
     # -- the items -------------------------------------------------------------------
 
     def depth_of(self, item: Item) -> float:
-        """The depth an item asks for, m (positive down, never above the surface)."""
+        """The depth an item asks for, m (positive down, never above the surface). A
+        terrain-frame item's is the bed sensed now less its height (the depth it
+        has while nothing is sensed); flying it follows the bed."""
         z, v = item.z, self.v
         if item.frame in (RELATIVE_ALT, RELATIVE_ALT_INT):
             depth = -z
-        elif item.frame in (TERRAIN_ALT, TERRAIN_ALT_INT):
-            depth = SEABED_M - z
+        elif is_terrain(item.frame):
+            bed = v.rangefinder.bed()
+            depth = v.depth if bed is None else bed - z
         else:
             depth = v.home_alt - z
         return min(max(depth, 0.0), v.model.depth_limit_m)
+
+    @staticmethod
+    def height_of(item: Item) -> float | None:
+        """A terrain-frame item's height above the bed, m; None for another."""
+        return item.z if is_terrain(item.frame) else None
 
     def point_of(self, item: Item) -> tuple[float, float]:
         """An item's place in the flat frame."""
@@ -103,6 +117,8 @@ class AutoFlight:
         self.last_point = None
         self.last_depth = self.v.hull.depth
         self.depth = self.v.hull.depth
+        self.height = self.last_height = None  # a terrain leg converts afresh
+        self.v.terrain.recovering = False
         self._begin(mission.current)
         return True
 
@@ -143,8 +159,11 @@ class AutoFlight:
             if item.command == NAV_WAYPOINT:
                 radius = item.param2 if item.param2 > 0 else 0.0
                 self.entries.append(
-                    Entry(n, self.point_of(item), self.depth_of(item), radius, [])
-                )
+                    Entry(
+                        n, self.point_of(item), self.depth_of(item), radius, [],
+                        self.height_of(item),
+                    )
+                )  # fmt: skip
             elif item.command in (NAV_LOITER_UNLIM, NAV_LOITER_TURNS):
                 break
             elif self.entries:
@@ -169,6 +188,7 @@ class AutoFlight:
         centre = self.last_point or v.position
         v.pilot.guidance.circle(centre, v.pilot.guidance.min_radius(), True)
         self.depth, self.entries, self.loiter = self.last_depth, [], None
+        self._leg(self.last_height)
 
     def _start_loiter(self, item: Item) -> None:
         v, g = self.v, self.v.pilot.guidance
@@ -176,6 +196,7 @@ class AutoFlight:
         if item.command == NAV_LOITER_TURNS and 0 < radius < least:
             v.say(f"Loiter radius raised to {least:.0f} m (item {item.seq})", INFO)
         self.depth = self.depth_of(item)
+        self._leg(self.height_of(item))
         centre = self.point_of(item)
         g.circle(
             centre,
@@ -194,12 +215,32 @@ class AutoFlight:
 
     # -- the step --------------------------------------------------------------------
 
+    def _leg(self, height: float | None) -> None:
+        """The leg flown now is at ``height`` above the bed (None: at a depth)."""
+        begins = height is not None and self.height is None
+        self.height = height
+        if begins:
+            self.v.terrain.leg_start()
+
     def actuators(self, dt: float) -> Actuators:
         """The actuators for one step of AUTO."""
-        v, g = self.v, self.v.pilot.guidance
+        v, g, terrain = self.v, self.v.pilot.guidance, self.v.terrain
+        if terrain.recovering:
+            return terrain.recovery_actuators(dt)
         if self.loiter is None and self.entries and g.mode == "route":
-            self.depth = self.entries[min(g.index, len(self.entries) - 1)].depth
-        act = v._fly_guidance(dt, v.speed, self.depth)
+            entry = self.entries[min(g.index, len(self.entries) - 1)]
+            self._leg(entry.height)
+            if entry.height is None:
+                self.depth = entry.depth
+            if terrain.recovering:  # the leg had no terrain to begin on
+                return terrain.recovery_actuators(dt)
+        rate = 0.0
+        if self.height is not None:
+            self.depth = terrain.depth_for(self.height, self.depth)
+            rate = terrain.depth_rate
+        else:
+            terrain.level()
+        act = v._fly_guidance(dt, v.speed, self.depth, rate)
         for k in g.pop_reached():
             self._reached(k)
         if self.loiter is not None:
@@ -212,7 +253,8 @@ class AutoFlight:
             return
         v, entry = self.v, self.entries[k - 1]
         v.reached.append(entry.seq)
-        self.last_point, self.last_depth = entry.point, entry.depth
+        self.last_point, self.last_height = entry.point, entry.height
+        self.last_depth = self.depth if entry.height is not None else entry.depth
         for seq in entry.after:
             self._do(v.mission.item(seq))
         if k == len(self.entries):
@@ -238,5 +280,6 @@ class AutoFlight:
             item = lo["item"]
             v.reached.append(item.seq)
             self.last_point, self.last_depth = lo["centre"], self.depth
+            self.last_height = self.height
             self.loiter = None
             self._begin(item.seq + 1)

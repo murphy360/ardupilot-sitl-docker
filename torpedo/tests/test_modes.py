@@ -110,12 +110,23 @@ def test_target_position_only_in_msl(front_seat):
     _within(c, fs, goal, fs.model.turn_radius_m + 2, 5.0)
 
 
-def test_target_in_the_terrain_frame_is_a_height_above_the_seabed(front_seat):
-    fs = front_seat()
+def test_target_in_the_terrain_frame_is_a_height_above_the_sensed_bed(front_seat):
+    fs = front_seat(sitl_params="SIM_SONAR_POS_Z 40")  # a bed at 10 m
     c = fs.client()
     mask = 0b0000_1101_1111_1000
-    goal = _go(c, fs, M.MAV_FRAME_GLOBAL_TERRAIN_ALT_INT, mask, 45.0)  # 50 m floor
-    _within(c, fs, goal, fs.model.turn_radius_m + 2, 5.0)
+    goal = _go(c, fs, M.MAV_FRAME_GLOBAL_TERRAIN_ALT_INT, mask, 4.0)
+    _within(c, fs, goal, fs.model.turn_radius_m + 2, 6.0)
+
+
+def test_terrain_target_with_a_velocity_is_dropped(front_seat):
+    """ArduSub converts a position with a velocity through the origin, which a
+    terrain altitude cannot be: it stops there, and so does the front seat."""
+    fs = front_seat(sitl_params="SIM_SONAR_POS_Z 40")
+    c = fs.client()
+    mask = 0b0000_1111_1100_0000
+    _go(c, fs, M.MAV_FRAME_GLOBAL_TERRAIN_ALT_INT, mask, 4.0, vx=1.0)
+    c.fresh("GLOBAL_POSITION_INT", settle=0.5)
+    assert fs.server.vehicle.target is None  # still circling where it entered
 
 
 def test_velocity_target_holds_course_and_depth(front_seat):

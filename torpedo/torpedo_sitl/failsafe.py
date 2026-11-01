@@ -54,7 +54,7 @@ class Failsafes:
     @property
     def active(self) -> bool:
         """Any failsafe that shows is on (the heartbeat says CRITICAL)."""
-        return self.gcs_active or self.battery_active
+        return self.gcs_active or self.battery_active or self.v.terrain.active
 
     def armed(self) -> None:
         """The vehicle has just armed: the pilot-input clock starts."""
