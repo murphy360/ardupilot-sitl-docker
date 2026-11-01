@@ -2,7 +2,9 @@
 
 Ports (TCP, MAVLink 2) are ``5760 + 10 * INSTANCE`` (SERIAL0, Proteus), ``+2``
 (SERIAL1, QGroundControl) and ``+3`` (SERIAL2, the referee and the world simulator).
-They open at once: unlike the SITL, nothing waits for SERIAL0. Vehicle time runs
+They open at once: unlike the SITL, nothing waits for SERIAL0. A fourth, ``+6``
+(SERIAL6, the acoustic ocean's truth feed), opens only when ``SERIAL6_PROTOCOL`` is 2,
+as ArduSub's does; a reboot reads the parameter again. Vehicle time runs
 ``SPEEDUP`` times wall time. Behind it (a loaded host) the front seat steps as fast as
 it can and falls behind, as the SITL does, without trying to catch up later.
 ``PREFLIGHT_REBOOT_SHUTDOWN`` closes every link and starts again at ``SIM_OPOS_*`` with
@@ -32,6 +34,8 @@ DT = 0.05  # s of vehicle time per step
 WORK_S = 0.05  # wall s of stepping at most between two looks at the sockets
 LAG_S = 0.5  # wall s of lag the clock puts up with before it falls behind for good
 PORT_BASE = 5760
+SERIAL6_OFFSET = 6
+SERIAL_MAVLINK2 = 2.0  # SERIAL6_PROTOCOL's value that turns SERIAL6 on
 BANNER = "Torpedo front seat 0.1, hull {}"
 
 
@@ -57,13 +61,20 @@ class Config:
 
     @property
     def ports(self) -> dict[str, int]:
-        """The three ports by name."""
+        """The three ports by name (SERIAL6 is ``serial6_port``, when it is on)."""
         if self.any_port:
             return {"SERIAL0": 0, "SERIAL1": 0, "SERIAL2": 0}
         base = self.base_port
         if base is None:
             base = PORT_BASE + 10 * self.instance
         return {"SERIAL0": base, "SERIAL1": base + 2, "SERIAL2": base + 3}
+
+    @property
+    def serial6_port(self) -> int:
+        """SERIAL6's port: 5766 + 10 * INSTANCE (the system chooses in tests)."""
+        if self.any_port:
+            return 0
+        return self.ports["SERIAL0"] + SERIAL6_OFFSET
 
 
 class Server:
@@ -85,6 +96,7 @@ class Server:
         self.reboot_until: float | None = None
         self.errors: list[str] = []  # a message that failed to be handled
         self.bound: dict[str, int] = {}
+        self.listeners: dict[str, socket.socket] = {}
         self.protocol = Protocol()
         self.vehicle: Vehicle | None = None
         self.vehicle = self._boot()
@@ -102,13 +114,29 @@ class Server:
 
     def _open(self) -> None:
         for name, port in self.cfg.ports.items():
-            s = socket.socket()
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((self.cfg.host, port))
-            s.listen(8)
-            s.setblocking(False)
-            self.sel.register(s, selectors.EVENT_READ, name)
-            self.bound[name] = s.getsockname()[1]
+            self._listen(name, port)
+        self._sync_serial6()
+
+    def _listen(self, name: str, port: int) -> None:
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((self.cfg.host, port))
+        s.listen(8)
+        s.setblocking(False)
+        self.sel.register(s, selectors.EVENT_READ, name)
+        self.listeners[name] = s
+        self.bound[name] = s.getsockname()[1]
+
+    def _sync_serial6(self) -> None:
+        """SERIAL6 is served while ``SERIAL6_PROTOCOL`` is 2, and only then."""
+        on = self.params.get("SERIAL6_PROTOCOL", -1.0) == SERIAL_MAVLINK2
+        if on and "SERIAL6" not in self.listeners:
+            self._listen("SERIAL6", self.cfg.serial6_port)
+        elif not on and "SERIAL6" in self.listeners:
+            s = self.listeners.pop("SERIAL6")
+            self.bound.pop("SERIAL6")
+            self.sel.unregister(s)
+            s.close()
 
     # -- the clock --------------------------------------------------------------------
 
@@ -143,6 +171,7 @@ class Server:
                 return
             self.reboot_until = None
             self.params.reload()
+            self._sync_serial6()
             self.vehicle = self._boot()
         else:
             self._advance(now)

@@ -139,7 +139,7 @@ A torpedo cannot hover or move sideways. It holds speed, heading and depth on it
 | `torpedo_sitl/autopilot.py` | The loops and the guidance together |
 | `torpedo_sitl/check.py` | `torpedo-check <model.json>`: flies the acceptance scenarios on any model file |
 | `torpedo_sitl/vehicle.py` | The vehicle: modes, arming, targets, battery, what it knows of itself |
-| `torpedo_sitl/server.py`, `link.py`, `commands.py`, `messages.py` | The three MAVLink ports, the clock, each connection's stream rates, the commands and the telemetry |
+| `torpedo_sitl/server.py`, `link.py`, `commands.py`, `messages.py` | The MAVLink ports (three, and SERIAL6 when it is on), the clock, each connection's stream rates, the commands and the telemetry |
 | `torpedo_sitl/params.py` | The parameter store and its defaults |
 | `torpedo_sitl/mission.py`, `auto.py` | The mission and its protocol; AUTO flying it |
 | `torpedo_sitl/failsafe.py` | The failsafes and the Proteus-dead script |
@@ -179,8 +179,11 @@ With no `TORPEDO_MODEL` (or a file that is not a schema-1 model) the container s
 | `5760 + 10 x INSTANCE` | SERIAL0 | The vehicle interface (Proteus) |
 | `5762 + 10 x INSTANCE` | SERIAL1 | QGroundControl |
 | `5763 + 10 x INSTANCE` | SERIAL2 | The referee and the world simulator (`SIM_STATE`) |
+| `5766 + 10 x INSTANCE` | SERIAL6 | The acoustic ocean's truth feed (`SIM_STATE`). Open only when `SERIAL6_PROTOCOL` is 2 |
 
-All three are TCP servers, MAVLink 2, system id `SYSID`, component 1. They open at start: nothing waits for SERIAL0. A connection may close and come back at any time, and each has its own stream rates. A client sees a submarine (`MAV_TYPE_SUBMARINE`, ArduPilot's autopilot id) with a heartbeat every second of vehicle time, and `SIM_OPOS_LAT` answers, which is how a client knows it is talking to a simulator.
+SERIAL0, SERIAL1 and SERIAL2 are TCP servers, MAVLink 2, system id `SYSID`, component 1. They open at start: nothing waits for SERIAL0. A connection may close and come back at any time, and each has its own stream rates. A client sees a submarine (`MAV_TYPE_SUBMARINE`, ArduPilot's autopilot id) with a heartbeat every second of vehicle time, and `SIM_OPOS_LAT` answers, which is how a client knows it is talking to a simulator.
+
+**SERIAL6** is the port ArduSub's SITL gives the acoustic ocean (murphy360/proteus-acomms-ocean). It speaks what SERIAL2 does: the client asks for `SIM_STATE` and `GLOBAL_POSITION_INT` with `MAV_CMD_SET_MESSAGE_INTERVAL`, and `SIM_STATE` is the physics truth, not the estimate. The port is closed unless `SERIAL6_PROTOCOL` is 2 (the default, -1, leaves it closed), as ArduSub's is. Set it with a `SITL_PARAMS` line (`SERIAL6_PROTOCOL 2`) or a parameter file (publish the port with `-p 5766:5766`). A `PARAM_SET` of it takes effect at the next reboot (`PREFLIGHT_REBOOT_SHUTDOWN`). The start-up line lists the ports that are open: `Torpedo front seat, hull torpedo-test-small: SERIAL0 5760, SERIAL1 5762, SERIAL2 5763, SERIAL6 5766`. A client that disconnects and reconnects gets rows again.
 
 ### What it does
 
