@@ -24,6 +24,7 @@ CMD_REQUEST = M.MAV_CMD_REQUEST_MESSAGE
 CMD_INTERVAL = M.MAV_CMD_SET_MESSAGE_INTERVAL
 CMD_REBOOT = M.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN
 CMD_CURRENT = M.MAV_CMD_DO_SET_MISSION_CURRENT
+CMD_BATTERY_RESET = M.MAV_CMD_BATTERY_RESET
 FORCE_ARM = 21196.0  # param2 of ARM_DISARM that skips the pre-arm checks
 REAL32 = M.MAV_PARAM_TYPE_REAL32
 
@@ -103,8 +104,23 @@ def _current(server, conn, p) -> int:
     return ACCEPTED if server.vehicle.set_current_item(int(p[0])) else FAILED
 
 
+def _battery_reset(server, conn, p) -> int:
+    """MAV_CMD_BATTERY_RESET, as ArduSub answers it: param 1 the battery mask, param 2
+    the charge left in percent. The one battery is bit 0. Armed or not. A simulator's
+    test uses it as the stand-in for a battery swap."""
+    mask, pct = int(p[0]), p[1]
+    if not mask & 1:
+        return FAILED
+    if not 0.0 <= pct <= 100.0:
+        return DENIED
+    b = server.vehicle.battery
+    b.used_mah = b.capacity_mah * (1.0 - pct / 100.0)
+    return ACCEPTED
+
+
 COMMANDS = {
     CMD_CURRENT: _current,
+    CMD_BATTERY_RESET: _battery_reset,
     CMD_ARM: _arm,
     CMD_MODE: _mode,
     CMD_SPEED: _speed,
