@@ -23,6 +23,17 @@ from .guidance import LOITER_MIN, LOS_LA, TURN_K
 from .model import Model
 
 READ_ONLY = frozenset({"TPDO_MODEL"})
+# The names ArduPilot 4.7 renamed, both answered (the plugin reads a parameter by every
+# name it has been through, and sets the first one it finds). Each pair is one
+# parameter, as ArduPilot's own conversion carries the old value over: a value set or
+# loaded under either name is the value of both. Without it a client that set the old
+# name (SYSID_MYGCS) aimed nothing, since the failsafe reads the new one (Proteus#2633).
+ALIASES = {
+    "SYSID_MYGCS": "MAV_GCS_SYSID",
+    "MAV_GCS_SYSID": "SYSID_MYGCS",
+    "SYSID_THISMAV": "MAV_SYSID",
+    "MAV_SYSID": "SYSID_THISMAV",
+}
 MAX_NAME = 16
 
 
@@ -195,14 +206,19 @@ class ParamStore:
         for name, value in pairs:
             if name not in READ_ONLY:
                 self.values[name] = value
+                twin = ALIASES.get(name)
+                if twin is not None:
+                    self.values[twin] = value
 
     def set(self, name: str, value: float) -> bool:
         """``PARAM_SET``: change a known parameter and save it. False when the name
         is unknown or read only (the caller answers the current value)."""
         if name not in self.values or name in READ_ONLY:
             return False
-        self.values[name] = value
-        self.saved[name] = value
+        for each in (name, ALIASES.get(name)):
+            if each is not None and each in self.values:
+                self.values[each] = value
+                self.saved[each] = value
         self._write()
         return True
 
