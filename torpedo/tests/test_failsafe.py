@@ -106,6 +106,61 @@ def test_only_the_gcs_system_counts(hull_model):
     assert not v2.critical
 
 
+def test_the_old_gcs_name_is_the_same_parameter(hull_model):
+    """ArduPilot 4.7 renamed SYSID_MYGCS to MAV_GCS_SYSID. The front seat answers
+    both, so either name, set or loaded, is the value of both (Proteus#2633)."""
+    _, store = make_vehicle(hull_model, SYSID_MYGCS=250.0)
+    assert store.get("MAV_GCS_SYSID") == 250.0
+    assert store.set("MAV_GCS_SYSID", 251.0)
+    assert store.get("SYSID_MYGCS") == 251.0
+    assert store.set("SYSID_THISMAV", 9.0) and store.get("MAV_SYSID") == 9.0
+
+
+def test_a_gcs_named_by_the_old_name_fires_the_failsafe(hull_model):
+    """Proteus's plugin sets the first name it finds, SYSID_MYGCS. Its heartbeat
+    must then be the one the failsafe waits for, so a silent Proteus is noticed."""
+    v, store = make_vehicle(
+        hull_model, FS_PILOT_INPUT=0, FS_GCS_TIMEOUT=2.0, FS_GCS_ENABLE=3.0
+    )
+    run(v, 6.0)
+    assert store.set("SYSID_MYGCS", 250.0)  # PARAM_SET, as the plugin sends it
+    assert v.set_mode(veh.ALT_HOLD)[0] and v.arm(True)[0]
+    v.heartbeat(250)
+    run(v, 4.0)
+    assert v.critical and v.mode == veh.ALT_HOLD
+
+
+def test_pdead_takes_a_route_flown_in_auto_home(hull_model):
+    """Proteus dies while the sub flies its legs in AUTO, its GCS set by the old
+    name: the script leaves the legs for the way home behind the marker, and the
+    loiter at the legs' end is never flown (the UUV-COL stressed collision,
+    Proteus#2633: the dead sub circled there at work depth)."""
+    v, store = make_vehicle(
+        hull_model, FS_PILOT_INPUT=0, FS_GCS_TIMEOUT=2.0, FS_GCS_ENABLE=3.0
+    )
+    run(v, 6.0)
+    for name, value in (("SYSID_MYGCS", 250.0), ("PDEAD_ACTION", 2.0)):
+        assert store.set(name, value)
+    v.hull.depth, v.hull.u = 8.0, 1.5
+    v.world.depth = 8.0
+    v.new_mission(
+        [
+            home_item(v),
+            waypoint(v, 1, 0, 400, depth=8.0),
+            waypoint(v, 2, 0, 400, depth=8.0, command=NAV_LOITER_UNLIM),
+            plain_item(3, DO_LAND_START),
+            waypoint(v, 4, 100, 100),
+            waypoint(v, 5, 100, 0),
+        ]
+    )
+    assert v.set_mode(veh.AUTO)[0] and v.arm(True)[0]
+    v.heartbeat(250)
+    run(v, 8.0)
+    assert v.mode == veh.AUTO and v.mission.current in (3, 4, 5)
+    assert any(t.startswith("PDEAD: flying the return route") for t in _said(v))
+    assert 2 not in v.reached
+
+
 # -- the Proteus-dead script ---------------------------------------------------------
 
 
