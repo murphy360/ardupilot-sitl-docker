@@ -457,3 +457,18 @@ jobs:
       - name: Inspect published image
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.image }}:${{ steps.ap.outputs.version }}
+
+  # The one job the main ruleset requires (murphy360/standards templates/rulesets/main.json): whichever job above
+  # failed or was cancelled, this fixed name is what branch protection points at. A skipped job counts as passed.
+  result:
+    name: result
+    if: always()
+    needs: [resolve, torpedo, torpedo-image, torpedo-publish, build, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job that ran passed
+        run: |
+          echo '${{ toJSON(needs) }}' > needs.json
+          cat needs.json
+          jq -e 'all(.[]; .result == "success" or .result == "skipped")' needs.json
